@@ -1,0 +1,5 @@
+{
+  "name": "D2D",
+  "description": "A responsive management dashboard clone featuring quick access modules, calendar, system statistics, and keyboard shortcuts.",
+  "requestFramePermissions": []
+}

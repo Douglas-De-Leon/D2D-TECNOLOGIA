@@ -1,25 +1,42 @@
 import React, { useEffect, useState } from 'react';
 import { Edit2, Trash2, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
+import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
 import { Transaction } from '../types';
 
 const Finance: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState({ income: 0, expense: 0, balance: 0 });
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<Partial<Transaction> & { rawValue: number }>({
+      description: '',
+      type: 'receita',
+      status: 'Pendente',
+      date: '',
+      rawValue: 0
+  });
 
   const loadData = async () => {
     const data = await getAll<Transaction>('transactions');
-    setTransactions(data);
-    calculateSummary(data);
+    // Ensure numericValue is treated as number
+    const processedData = data.map(d => ({
+        ...d,
+        numericValue: Number(d.numericValue)
+    })).sort((a, b) => (b.id || 0) - (a.id || 0));
+
+    setTransactions(processedData);
+    calculateSummary(processedData);
   };
 
   const calculateSummary = (data: Transaction[]) => {
       let income = 0;
       let expense = 0;
       data.forEach(t => {
-          if(t.type === 'receita') income += t.numericValue;
-          if(t.type === 'despesa') expense += t.numericValue;
+          if(t.type === 'receita') income += (t.numericValue || 0);
+          if(t.type === 'despesa') expense += (t.numericValue || 0);
       });
       setSummary({ income, expense, balance: income - expense });
   };
@@ -28,29 +45,56 @@ const Finance: React.FC = () => {
     loadData();
   }, []);
 
-  const handleAdd = async () => {
-    const isIncome = Math.random() > 0.5;
-    const val = Math.floor(Math.random() * 500) + 50;
-    const newTrans: Transaction = {
-        type: isIncome ? 'receita' : 'despesa',
-        description: isIncome ? 'Nova Receita' : 'Nova Despesa',
-        value: val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-        numericValue: val,
-        date: new Date().toLocaleDateString('pt-BR'),
-        status: 'Pendente'
-    };
-    await addItem('transactions', newTrans);
-    loadData();
+  const openModal = (trans?: Transaction) => {
+    if (trans) {
+        setFormData({
+            ...trans,
+            rawValue: trans.numericValue
+        });
+        setIsEditing(true);
+    } else {
+        setFormData({
+            description: '',
+            type: 'receita',
+            status: 'Pendente',
+            date: new Date().toLocaleDateString('pt-BR'),
+            rawValue: 0
+        });
+        setIsEditing(false);
+    }
+    setIsModalOpen(true);
   };
 
-  const handleEdit = async (trans: Transaction) => {
-    const newDesc = prompt('Editar Descrição:', trans.description);
-    if (newDesc && newDesc !== trans.description) {
-        const updatedTrans = { ...trans, description: newDesc };
-        await updateItem('transactions', updatedTrans);
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Format value for display
+    const formattedValue = formData.rawValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    
+    const transactionToSave: Transaction = {
+        id: formData.id,
+        description: formData.description || '',
+        type: formData.type as 'receita' | 'despesa',
+        status: formData.status || 'Pendente',
+        date: formData.date || '',
+        numericValue: formData.rawValue,
+        value: formattedValue
+    };
+
+    try {
+        if (isEditing && formData.id) {
+            await updateItem('transactions', transactionToSave);
+        } else {
+            await addItem('transactions', transactionToSave);
+        }
+        setIsModalOpen(false);
         loadData();
+    } catch (error) {
+        console.error(error);
+        alert('Erro ao salvar lançamento');
     }
   };
+
 
   const handleDelete = async (id: number) => {
     if (window.confirm('Excluir este lançamento?')) {
@@ -65,7 +109,7 @@ const Finance: React.FC = () => {
 
   return (
     <div>
-      <PageHeader title="Lançamentos Financeiros" buttonLabel="Novo Lançamento" onButtonClick={handleAdd} />
+      <PageHeader title="Lançamentos Financeiros" buttonLabel="Novo Lançamento" onButtonClick={() => openModal()} />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -135,13 +179,13 @@ const Finance: React.FC = () => {
                       </span>
                   </td>
                   <td className={`px-6 py-4 font-bold ${item.type === 'receita' ? 'text-green-600' : 'text-red-600'}`}>
-                      {item.type === 'despesa' ? '-' : ''}{item.value}
+                      {item.type === 'despesa' ? '-' : ''}{formatCurrency(Number(item.numericValue))}
                   </td>
                   <td className="px-6 py-4 flex justify-center space-x-2">
                     <button 
                         className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
                         title="Editar"
-                        onClick={() => handleEdit(item)}
+                        onClick={() => openModal(item)}
                     >
                         <Edit2 className="h-4 w-4" />
                     </button>
@@ -159,6 +203,52 @@ const Finance: React.FC = () => {
           </table>
         </div>
       </div>
+
+       <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title={isEditing ? "Editar Lançamento" : "Novo Lançamento"}
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+            <div>
+                <label className="block text-sm font-medium text-gray-700">Descrição</label>
+                <input type="text" required value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Tipo</label>
+                    <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                        <option value="receita">Receita</option>
+                        <option value="despesa">Despesa</option>
+                    </select>
+                </div>
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Valor (R$)</label>
+                    <input type="number" required step="0.01" value={formData.rawValue} onChange={e => setFormData({...formData, rawValue: Number(e.target.value)})} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Data Vencimento</label>
+                    <input type="text" placeholder="DD/MM/AAAA" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+                </div>
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Status</label>
+                    <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                        <option value="Pendente">Pendente</option>
+                        <option value="Pago">Pago</option>
+                    </select>
+                </div>
+            </div>
+
+             <div className="flex justify-end pt-2">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md">Cancelar</button>
+                <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
+            </div>
+        </form>
+      </Modal>
     </div>
   );
 };

@@ -3,9 +3,10 @@ import { Search, Bell, Menu, User } from 'lucide-react';
 
 interface HeaderProps {
   onMenuClick: () => void;
+  userName?: string;
 }
 
-const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
+const Header: React.FC<HeaderProps> = ({ onMenuClick, userName }) => {
   return (
     <header className="bg-white shadow-sm h-16 flex items-center justify-between px-4 md:px-6 relative z-10">
       <div className="flex items-center">
@@ -39,8 +40,8 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         {/* User Profile */}
         <div className="flex items-center">
             <div className="flex flex-col items-end mr-3 hidden sm:flex">
-                <span className="text-xs text-gray-400">Boa noite</span>
-                <span className="text-sm font-medium text-gray-700">Edmilson</span>
+                <span className="text-xs text-gray-400">Bem-vindo</span>
+                <span className="text-sm font-medium text-gray-700">{userName || 'Usuário'}</span>
             </div>
             <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center border-2 border-white shadow-sm">
                 <User className="h-6 w-6 text-gray-500" />

@@ -25,12 +25,28 @@ export interface StatMetric {
 }
 
 // Database Entities
+export interface SystemUser {
+    id?: number;
+    name: string;
+    email: string;
+    password?: string; // Only used for auth verification, not stored in state ideally
+    level: 'admin' | 'user';
+}
+
 export interface Client {
   id?: number;
   name: string;
-  cpf: string;
+  cpf: string; // CPF ou CNPJ
   phone: string;
   email: string;
+  // Campos adicionais
+  type: 'Cliente' | 'Fornecedor';
+  cep?: string;
+  street?: string;
+  number?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
 }
 
 export interface Product {
@@ -49,6 +65,16 @@ export interface Service {
   price: string;
 }
 
+// Interface para itens dentro da OS e Vendas
+export interface OrderItem {
+    id: string; // ID único temporário para a lista visual ou ID do produto/serviço original
+    originalId?: number; // Referência ao ID no banco
+    name: string;
+    price: number;
+    quantity: number;
+    type: 'product' | 'service';
+}
+
 export interface Order {
   id?: number;
   client: string;
@@ -57,6 +83,14 @@ export interface Order {
   status: string;
   statusColor: string;
   total: string;
+  description?: string;
+  
+  // Listas JSON
+  services_list?: OrderItem[];
+  products_list?: OrderItem[];
+  
+  // Mantendo compatibilidade com versões anteriores (visualização rápida na tabela)
+  service?: string;     
 }
 
 export interface Sale {
@@ -65,7 +99,19 @@ export interface Sale {
   date: string;
   total: string;
   status: 'Faturado' | 'Aberto' | 'Cancelado';
-  details: string; // Resumo dos itens
+  details: string; // Observações gerais
+  products_list?: OrderItem[]; // Lista de itens vendidos
+}
+
+export interface FileDocument {
+  id?: number;
+  name: string;
+  client?: string; // Nome do cliente/fornecedor associado
+  date: string;
+  description: string;
+  type: string; // Extension or mime type
+  size: string;
+  url?: string; // Placeholder for real URL
 }
 
 export interface Transaction {
@@ -85,4 +131,5 @@ export interface CompanySettings {
   phone: string;
   address: string;
   theme: string;
+  warrantyText?: string; // Texto dos termos de garantia
 }

@@ -1,50 +1,136 @@
 import React, { useEffect, useState } from 'react';
-import { Edit2, Trash2, Search, ShoppingCart, Eye } from 'lucide-react';
+import { Edit2, Trash2, Search, ShoppingCart, Eye, AlertTriangle, Plus, X, Package, UserPlus } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
+import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
-import { Sale } from '../types';
+import { Sale, Client, Product, OrderItem } from '../types';
 
 const Sales: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
+  
+  // Listas Auxiliares
+  const [clientsList, setClientsList] = useState<Client[]>([]);
+  const [productsList, setProductsList] = useState<Product[]>([]);
+
+  // Modais de Seleção
+  const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
+  const [isProductSelectOpen, setIsProductSelectOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formData, setFormData] = useState<Sale>({
+    client: '',
+    date: '',
+    total: 'R$ 0,00',
+    status: 'Aberto',
+    details: '',
+    products_list: []
+  });
+  const [isEditing, setIsEditing] = useState(false);
+
+  // Estados para Exclusão
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null);
+
+  // Use 'service_sales' instead of 'sales' to avoid ad-blockers
+  const TABLE_NAME = 'service_sales';
 
   const loadData = async () => {
-    const data = await getAll<Sale>('sales');
-    setSales(data);
+    const data = await getAll<Sale>(TABLE_NAME);
+    setSales(data.sort((a, b) => (b.id || 0) - (a.id || 0)));
+  };
+
+  const loadAuxData = async () => {
+      const clients = await getAll<Client>('clients');
+      const products = await getAll<Product>('products');
+      setClientsList(clients);
+      setProductsList(products);
   };
 
   useEffect(() => {
     loadData();
+    loadAuxData();
   }, []);
 
-  const handleAdd = async () => {
-    // Simulating adding a new sale with random data
-    const randomValue = Math.floor(Math.random() * 1000) + 50;
-    const newSale: Sale = {
-        client: 'Cliente Balcão',
-        date: new Date().toLocaleDateString('pt-BR'),
-        total: randomValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-        status: 'Aberto',
-        details: 'Venda Rápida (Exemplo)'
-    };
-    await addItem('sales', newSale);
-    loadData();
+  // --- Helpers de Moeda ---
+  const currencyToNumber = (currencyStr: string): number => {
+    if (!currencyStr) return 0;
+    const cleanStr = currencyStr.replace(/[R$\s.]/g, '').replace(',', '.');
+    return parseFloat(cleanStr) || 0;
   };
 
-  const handleEdit = async (sale: Sale) => {
-    const newStatus = prompt('Editar Status (Faturado, Aberto, Cancelado):', sale.status);
-    if (newStatus && (newStatus === 'Faturado' || newStatus === 'Aberto' || newStatus === 'Cancelado')) {
-        const updatedSale = { ...sale, status: newStatus as any };
-        await updateItem('sales', updatedSale);
-        loadData();
-    } else if (newStatus) {
-        alert('Status inválido. Use: Faturado, Aberto ou Cancelado.');
+  const numberToCurrency = (num: number): string => {
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
+  // --- Cálculo Automático do Total ---
+  useEffect(() => {
+    if (isModalOpen) {
+        const productsTotal = (formData.products_list || []).reduce((acc, item) => acc + (item.price * item.quantity), 0);
+        setFormData(prev => ({
+            ...prev,
+            total: numberToCurrency(productsTotal)
+        }));
+    }
+  }, [formData.products_list, isModalOpen]);
+
+  const openModal = (sale?: Sale) => {
+    if (sale) {
+      setFormData({
+          ...sale,
+          products_list: sale.products_list || []
+      });
+      setIsEditing(true);
+    } else {
+      setFormData({
+        client: '',
+        date: new Date().toLocaleDateString('pt-BR'),
+        total: 'R$ 0,00',
+        status: 'Aberto',
+        details: '',
+        products_list: []
+      });
+      setIsEditing(false);
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (isEditing && formData.id) {
+        await updateItem(TABLE_NAME, formData);
+      } else {
+        const newId = await addItem(TABLE_NAME, formData);
+        if (newId === 0) {
+            throw new Error("Falha ao criar venda. Verifique a conexão.");
+        }
+      }
+      setIsModalOpen(false);
+      loadData();
+    } catch (error) {
+        console.error(error);
+        alert("Erro ao salvar venda. Verifique se o bloqueador de anúncios não está interferindo.");
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (window.confirm('Tem certeza que deseja excluir esta venda?')) {
-        await deleteItem('sales', id);
-        loadData();
+  // Abre o modal de confirmação
+  const handleDeleteClick = (sale: Sale) => {
+    setSaleToDelete(sale);
+    setIsDeleteModalOpen(true);
+  };
+
+  // Executa a exclusão de fato
+  const confirmDelete = async () => {
+    if (saleToDelete && saleToDelete.id) {
+        const success = await deleteItem(TABLE_NAME, saleToDelete.id);
+        if (success) {
+            loadData();
+            setIsDeleteModalOpen(false);
+            setSaleToDelete(null);
+        } else {
+            alert("Erro ao excluir venda.");
+        }
     }
   };
 
@@ -56,9 +142,60 @@ const Sales: React.FC = () => {
       }
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  // --- Funções de Seleção de Cliente e Produtos ---
+
+  const selectClient = (clientName: string) => {
+      setFormData({ ...formData, client: clientName });
+      setIsClientSelectOpen(false);
+      setSearchTerm('');
+  };
+
+  const addProduct = (product: Product) => {
+      const priceNumber = currencyToNumber(product.price);
+      const newItem: OrderItem = {
+          id: Math.random().toString(36).substr(2, 9),
+          originalId: product.id,
+          name: product.name,
+          price: priceNumber,
+          quantity: 1,
+          type: 'product'
+      };
+
+      setFormData(prev => ({
+          ...prev,
+          products_list: [...(prev.products_list || []), newItem]
+      }));
+      setIsProductSelectOpen(false);
+      setSearchTerm('');
+  };
+
+  const removeProduct = (id: string) => {
+      setFormData(prev => ({
+          ...prev,
+          products_list: prev.products_list?.filter(item => item.id !== id)
+      }));
+  };
+
+  const updateProductQuantity = (id: string, newQty: number) => {
+      if (newQty < 1) return;
+      setFormData(prev => ({
+          ...prev,
+          products_list: prev.products_list?.map(item => 
+              item.id === id ? { ...item, quantity: newQty } : item
+          )
+      }));
+  };
+
+  const filteredClients = clientsList.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredProducts = productsList.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
   return (
     <div>
-      <PageHeader title="Vendas" buttonLabel="Adicionar Venda" onButtonClick={handleAdd} />
+      <PageHeader title="Vendas" buttonLabel="Adicionar Venda" onButtonClick={() => openModal()} />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         {/* Search Bar */}
@@ -80,7 +217,7 @@ const Sales: React.FC = () => {
                 <th className="px-6 py-3 font-medium">#</th>
                 <th className="px-6 py-3 font-medium">Cliente</th>
                 <th className="px-6 py-3 font-medium">Data</th>
-                <th className="px-6 py-3 font-medium">Detalhes</th>
+                <th className="px-6 py-3 font-medium">Itens</th>
                 <th className="px-6 py-3 font-medium">Faturado</th>
                 <th className="px-6 py-3 font-medium">Total</th>
                 <th className="px-6 py-3 font-medium text-center">Ações</th>
@@ -100,7 +237,11 @@ const Sales: React.FC = () => {
                         </div>
                     </td>
                     <td className="px-6 py-4">{sale.date}</td>
-                    <td className="px-6 py-4 text-gray-500 truncate max-w-xs">{sale.details}</td>
+                    <td className="px-6 py-4 text-gray-500">
+                        {sale.products_list && sale.products_list.length > 0 
+                            ? `${sale.products_list.length} itens` 
+                            : (sale.details || '-')}
+                    </td>
                     <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold text-white ${getStatusColor(sale.status)}`}>
                             {sale.status}
@@ -112,14 +253,14 @@ const Sales: React.FC = () => {
                         <button 
                             className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600 transition-colors" 
                             title="Editar"
-                            onClick={() => handleEdit(sale)}
+                            onClick={() => openModal(sale)}
                         >
                         <Edit2 className="h-4 w-4" />
                         </button>
                         <button 
                             className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600 transition-colors" 
                             title="Excluir"
-                            onClick={() => sale.id && handleDelete(sale.id)}
+                            onClick={() => handleDeleteClick(sale)}
                         >
                         <Trash2 className="h-4 w-4" />
                         </button>
@@ -131,6 +272,234 @@ const Sales: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Modal de Cadastro / Edição */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title={isEditing ? "Editar Venda" : "Nova Venda"}
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+            {/* Seleção de Cliente */}
+            <div>
+                <label className="block text-sm font-medium text-gray-700">Cliente</label>
+                <div className="flex mt-1">
+                    <input 
+                        type="text" 
+                        name="client" 
+                        required 
+                        readOnly
+                        value={formData.client} 
+                        placeholder="Selecione um cliente"
+                        className="block w-full border border-gray-300 rounded-l-md p-2 bg-gray-50 cursor-pointer"
+                        onClick={() => setIsClientSelectOpen(true)}
+                    />
+                    <button 
+                        type="button"
+                        onClick={() => setIsClientSelectOpen(true)}
+                        className="bg-brand-blue text-white px-3 rounded-r-md hover:bg-blue-600"
+                    >
+                        <Search className="h-4 w-4" />
+                    </button>
+                </div>
+            </div>
+            
+             <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Status</label>
+                    <select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                        <option value="Aberto">Aberto</option>
+                        <option value="Faturado">Faturado</option>
+                        <option value="Cancelado">Cancelado</option>
+                    </select>
+                </div>
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Valor Total (Auto)</label>
+                    <input type="text" name="total" readOnly value={formData.total} className="mt-1 block w-full border border-gray-300 rounded-md p-2 bg-gray-100 font-bold" />
+                </div>
+            </div>
+
+            {/* Lista de Produtos */}
+            <div className="border-t pt-4 mt-2">
+                <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-medium text-gray-700">Itens da Venda</h4>
+                    <button 
+                        type="button" 
+                        onClick={() => setIsProductSelectOpen(true)}
+                        className="text-xs bg-green-50 text-green-700 px-3 py-1 rounded-full border border-green-200 hover:bg-green-100 flex items-center"
+                    >
+                        <Plus className="h-3 w-3 mr-1" /> Adicionar Item
+                    </button>
+                </div>
+
+                <div className="border rounded-md overflow-hidden bg-gray-50 min-h-[150px] max-h-[250px] overflow-y-auto">
+                    {(!formData.products_list || formData.products_list.length === 0) ? (
+                        <div className="flex flex-col items-center justify-center h-40 text-gray-400 text-sm">
+                            <Package className="h-8 w-8 mb-2 opacity-50" />
+                            Nenhum item adicionado.
+                        </div>
+                    ) : (
+                        <table className="w-full text-sm text-left">
+                             <thead className="text-xs text-gray-500 uppercase bg-gray-100 border-b">
+                                <tr>
+                                    <th className="px-4 py-2">Produto</th>
+                                    <th className="px-2 py-2 text-center w-16">Qtd</th>
+                                    <th className="px-2 py-2 text-right">Unit.</th>
+                                    <th className="px-2 py-2 text-right">Total</th>
+                                    <th className="px-2 py-2 w-8"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {formData.products_list.map((item) => (
+                                    <tr key={item.id} className="bg-white">
+                                        <td className="px-4 py-2">{item.name}</td>
+                                        <td className="px-2 py-2 text-center">
+                                            <input 
+                                                type="number" 
+                                                min="1"
+                                                value={item.quantity}
+                                                onChange={(e) => updateProductQuantity(item.id, parseInt(e.target.value))}
+                                                className="w-12 text-center border rounded p-1 text-xs"
+                                            />
+                                        </td>
+                                        <td className="px-2 py-2 text-right text-xs">{numberToCurrency(item.price)}</td>
+                                        <td className="px-2 py-2 text-right font-medium text-xs">{numberToCurrency(item.price * item.quantity)}</td>
+                                        <td className="px-2 py-2 text-center">
+                                            <button 
+                                                type="button" 
+                                                onClick={() => removeProduct(item.id)}
+                                                className="text-red-400 hover:text-red-600"
+                                            >
+                                                <X className="h-4 w-4" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+
+             <div>
+                <label className="block text-sm font-medium text-gray-700 mt-2">Observações</label>
+                <textarea 
+                    name="details" 
+                    rows={2} 
+                    value={formData.details} 
+                    onChange={handleChange} 
+                    className="mt-1 block w-full border border-gray-300 rounded-md p-2 text-sm"
+                    placeholder="Informações adicionais..."
+                ></textarea>
+            </div>
+             <div className="flex justify-end pt-2">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md">Cancelar</button>
+                <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
+            </div>
+        </form>
+      </Modal>
+
+      {/* Modal de Seleção de Cliente */}
+      <Modal
+         isOpen={isClientSelectOpen}
+         onClose={() => setIsClientSelectOpen(false)}
+         title="Selecionar Cliente"
+      >
+        <div className="mb-4">
+             <input 
+                type="text" 
+                placeholder="Buscar cliente..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-1 focus:ring-brand-blue" 
+             />
+        </div>
+        <div className="max-h-60 overflow-y-auto">
+            {filteredClients.map(client => (
+                <div 
+                    key={client.id} 
+                    onClick={() => selectClient(client.name)}
+                    className="p-3 hover:bg-gray-50 cursor-pointer flex items-center justify-between group border-b border-gray-100 last:border-0"
+                >
+                    <div>
+                        <p className="font-medium text-gray-800">{client.name}</p>
+                        <p className="text-xs text-gray-500">{client.email || client.phone}</p>
+                    </div>
+                    <UserPlus className="h-4 w-4 text-gray-400 group-hover:text-brand-blue" />
+                </div>
+            ))}
+        </div>
+      </Modal>
+
+      {/* Modal de Seleção de Produto */}
+      <Modal
+         isOpen={isProductSelectOpen}
+         onClose={() => setIsProductSelectOpen(false)}
+         title="Adicionar Item"
+      >
+         <div className="mb-4">
+             <input 
+                type="text" 
+                placeholder="Buscar produto..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-1 focus:ring-brand-blue" 
+             />
+        </div>
+        <div className="max-h-60 overflow-y-auto">
+            {filteredProducts.map(product => (
+                <div 
+                    key={product.id} 
+                    onClick={() => addProduct(product)}
+                    className="p-3 hover:bg-gray-50 cursor-pointer flex items-center justify-between group border-b border-gray-100 last:border-0"
+                >
+                    <div>
+                        <p className="font-medium text-gray-800">{product.name}</p>
+                        <div className="flex gap-2 text-xs text-gray-500">
+                             <span>Estoque: {product.stock}</span>
+                             <span>•</span>
+                             <span>{product.price}</span>
+                        </div>
+                    </div>
+                    <Package className="h-4 w-4 text-gray-400 group-hover:text-brand-blue" />
+                </div>
+            ))}
+        </div>
+      </Modal>
+
+      {/* Modal de Confirmação de Exclusão */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title="Confirmar Exclusão"
+      >
+        <div className="flex flex-col items-center text-center space-y-4">
+            <div className="bg-red-100 p-3 rounded-full">
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+            </div>
+            <div>
+                <h4 className="text-lg font-medium text-gray-900">Excluir Venda?</h4>
+                <p className="text-sm text-gray-500 mt-2">
+                    Você tem certeza que deseja excluir a venda de <strong>{saleToDelete?.client}</strong>? 
+                    <br/>Esta ação não poderá ser desfeita.
+                </p>
+            </div>
+            <div className="flex w-full space-x-3 mt-4">
+                <button
+                    onClick={() => setIsDeleteModalOpen(false)}
+                    className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                    Cancelar
+                </button>
+                <button
+                    onClick={confirmDelete}
+                    className="w-full px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                    Excluir
+                </button>
+            </div>
+        </div>
+      </Modal>
     </div>
   );
 };

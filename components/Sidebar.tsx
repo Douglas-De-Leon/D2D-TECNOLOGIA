@@ -3,8 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   Home, 
   Users, 
-  Package, 
-  Wrench, 
   ShoppingCart, 
   ClipboardList, 
   ShieldCheck, 
@@ -12,23 +10,10 @@ import {
   DollarSign, 
   LogOut,
   Settings,
-  PieChart
+  PieChart,
+  User
 } from 'lucide-react';
-import { MenuItem } from '../types';
-
-const menuItems: MenuItem[] = [
-  { id: 'home', label: 'Início', icon: Home, path: '/' },
-  { id: 'clients', label: 'Clientes / Fornecedor', icon: Users, path: '/clients' },
-  { id: 'products', label: 'Produtos', icon: Package, path: '/products' },
-  { id: 'services', label: 'Serviços', icon: Wrench, path: '/services' },
-  { id: 'sales', label: 'Vendas', icon: ShoppingCart, path: '/sales' },
-  { id: 'orders', label: 'Ordens de Serviço', icon: ClipboardList, path: '/orders' },
-  { id: 'warranties', label: 'Termos de Garantias', icon: ShieldCheck, path: '/warranties' },
-  { id: 'files', label: 'Arquivos', icon: FileText, path: '/files' },
-  { id: 'finance', label: 'Lançamentos', icon: DollarSign, path: '/finance' },
-  { id: 'reports', label: 'Relatórios', icon: PieChart, path: '/reports' },
-  { id: 'settings', label: 'Configurações', icon: Settings, path: '/settings' },
-];
+import { MenuItem, SystemUser } from '../types';
 
 interface SidebarProps {
     onLogout?: () => void;
@@ -36,12 +21,45 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
   const location = useLocation();
+  const userStr = localStorage.getItem('mapos_user');
+  const user: SystemUser | null = userStr ? JSON.parse(userStr) : null;
+  const level = user?.level || 'user';
+
+  // Definição completa do menu
+  const allMenuItems: MenuItem[] = [
+    { id: 'home', label: 'Início', icon: Home, path: '/' },
+    { id: 'clients', label: 'Clientes / Fornecedor', icon: Users, path: '/clients' },
+    // Produtos e Serviços removidos conforme solicitado
+    { id: 'sales', label: 'Vendas', icon: ShoppingCart, path: '/sales' },
+    { id: 'orders', label: 'Ordens de Serviço', icon: ClipboardList, path: '/orders' },
+    { id: 'warranties', label: 'Termos de Garantias', icon: ShieldCheck, path: '/warranties' },
+    { id: 'files', label: 'Arquivos', icon: FileText, path: '/files' },
+    { id: 'finance', label: 'Lançamentos', icon: DollarSign, path: '/finance' },
+    { id: 'reports', label: 'Relatórios', icon: PieChart, path: '/reports' },
+    { id: 'settings', label: 'Configurações', icon: Settings, path: '/settings' },
+  ];
+
+  // Filtro de permissões
+  const menuItems = allMenuItems.filter(item => {
+      if (level === 'admin') return true;
+
+      if (level === 'technician') {
+          // Funcionário vê tudo exceto Configurações e Garantias (por exemplo)
+          return !['settings', 'warranties', 'finance'].includes(item.id); 
+      }
+
+      if (level === 'client') {
+          // Cliente vê suas ordens, vendas, arquivos
+          return ['sales', 'orders', 'files'].includes(item.id);
+      }
+
+      return true;
+  });
 
   return (
     <div className="flex flex-col h-full bg-sidebar text-gray-300 shadow-xl">
       <div className="flex items-center justify-center h-20 border-b border-gray-700 bg-sidebar">
         <div className="flex items-center space-x-2">
-            {/* Logo Simulation */}
             <div className="w-8 h-8 bg-brand-yellow rounded-md flex items-center justify-center transform rotate-45">
                 <div className="w-4 h-4 border-2 border-sidebar rounded-full"></div>
             </div>
@@ -71,6 +89,22 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
               </Link>
             );
           })}
+          
+           {/* Link para Perfil sempre visível */}
+            <Link
+                to="/profile"
+                className={`
+                  group flex items-center px-3 py-3 text-sm font-medium rounded-md transition-colors duration-150 mt-4
+                  ${location.pathname === '/profile'
+                    ? 'bg-gray-900 text-white shadow-md border-l-4 border-brand-blue' 
+                    : 'hover:bg-sidebarHover hover:text-white'
+                  }
+                `}
+              >
+                <User className={`mr-3 h-5 w-5 ${location.pathname === '/profile' ? 'text-brand-blue' : 'text-gray-400 group-hover:text-gray-300'}`} />
+                Meu Perfil
+            </Link>
+
         </nav>
       </div>
 

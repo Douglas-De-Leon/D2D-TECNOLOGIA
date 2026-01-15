@@ -1,12 +1,18 @@
 import React from 'react';
 import { Search, Bell, Menu, User } from 'lucide-react';
+import { SystemUser } from '../types';
 
 interface HeaderProps {
   onMenuClick: () => void;
   userName?: string;
+  user?: SystemUser | null;
 }
 
-const Header: React.FC<HeaderProps> = ({ onMenuClick, userName }) => {
+const Header: React.FC<HeaderProps> = ({ onMenuClick, userName, user }) => {
+  // Se o objeto user não for passado, tenta pegar do localStorage
+  const currentUser = user || (localStorage.getItem('mapos_user') ? JSON.parse(localStorage.getItem('mapos_user')!) : null);
+  const displayName = currentUser?.name || userName || 'Usuário';
+
   return (
     <header className="bg-white shadow-sm h-16 flex items-center justify-between px-4 md:px-6 relative z-10">
       <div className="flex items-center">
@@ -41,10 +47,15 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, userName }) => {
         <div className="flex items-center">
             <div className="flex flex-col items-end mr-3 hidden sm:flex">
                 <span className="text-xs text-gray-400">Bem-vindo</span>
-                <span className="text-sm font-medium text-gray-700">{userName || 'Usuário'}</span>
+                <span className="text-sm font-medium text-gray-700 truncate max-w-[150px]">{displayName}</span>
             </div>
-            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center border-2 border-white shadow-sm">
-                <User className="h-6 w-6 text-gray-500" />
+            
+            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center border-2 border-white shadow-sm overflow-hidden">
+                {currentUser?.avatar_url ? (
+                    <img src={currentUser.avatar_url} alt="Profile" className="h-full w-full object-cover" />
+                ) : (
+                    <User className="h-6 w-6 text-gray-500" />
+                )}
             </div>
         </div>
       </div>

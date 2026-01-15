@@ -3,10 +3,11 @@ import { Edit2, Trash2, Search, ShoppingCart, Eye, AlertTriangle, Plus, X, Packa
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
-import { Sale, Client, Product, OrderItem } from '../types';
+import { Sale, Client, Product, OrderItem, SystemUser } from '../types';
 
 const Sales: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
+  const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
   
   // Listas Auxiliares
   const [clientsList, setClientsList] = useState<Client[]>([]);
@@ -20,6 +21,7 @@ const Sales: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState<Sale>({
     client: '',
+    responsible: '',
     date: '',
     total: 'R$ 0,00',
     status: 'Aberto',
@@ -35,9 +37,36 @@ const Sales: React.FC = () => {
   // Use 'service_sales' instead of 'sales' to avoid ad-blockers
   const TABLE_NAME = 'service_sales';
 
+  useEffect(() => {
+    const stored = localStorage.getItem('mapos_user');
+    if (stored) {
+        setCurrentUser(JSON.parse(stored));
+    }
+    loadData();
+    loadAuxData();
+  }, []);
+
+  const isClientLevel = currentUser?.level === 'client';
+  const isTechnicianLevel = currentUser?.level === 'technician';
+
   const loadData = async () => {
     const data = await getAll<Sale>(TABLE_NAME);
-    setSales(data.sort((a, b) => (b.id || 0) - (a.id || 0)));
+    const stored = localStorage.getItem('mapos_user');
+    const user: SystemUser | null = stored ? JSON.parse(stored) : null;
+    
+    let filteredData = data.sort((a, b) => (b.id || 0) - (a.id || 0));
+
+    // FILTRO
+    if (user) {
+        if (user.level === 'client') {
+            filteredData = filteredData.filter(s => s.client.toLowerCase() === user.name.toLowerCase());
+        } else if (user.level === 'technician') {
+             // Técnico vê apenas Vendas onde ele é responsável
+             filteredData = filteredData.filter(s => s.responsible === user.name);
+        }
+    }
+
+    setSales(filteredData);
   };
 
   const loadAuxData = async () => {
@@ -46,11 +75,6 @@ const Sales: React.FC = () => {
       setClientsList(clients);
       setProductsList(products);
   };
-
-  useEffect(() => {
-    loadData();
-    loadAuxData();
-  }, []);
 
   // --- Helpers de Moeda ---
   const currencyToNumber = (currencyStr: string): number => {
@@ -78,12 +102,14 @@ const Sales: React.FC = () => {
     if (sale) {
       setFormData({
           ...sale,
+          responsible: sale.responsible || '',
           products_list: sale.products_list || []
       });
       setIsEditing(true);
     } else {
       setFormData({
-        client: '',
+        client: isClientLevel && currentUser ? currentUser.name : '',
+        responsible: isTechnicianLevel && currentUser ? currentUser.name : '',
         date: new Date().toLocaleDateString('pt-BR'),
         total: 'R$ 0,00',
         status: 'Aberto',
@@ -110,7 +136,7 @@ const Sales: React.FC = () => {
       loadData();
     } catch (error) {
         console.error(error);
-        alert("Erro ao salvar venda. Verifique se o bloqueador de anúncios não está interferindo.");
+        alert("Erro ao salvar venda.");
     }
   };
 
@@ -193,9 +219,19 @@ const Sales: React.FC = () => {
   const filteredClients = clientsList.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredProducts = productsList.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
+  // Terminologia Dinâmica
+  const pageTitle = isClientLevel ? "Minhas Compras" : "Vendas";
+  const btnLabel = isClientLevel ? "Nova Compra" : "Adicionar Venda";
+  const modalTitleNew = isClientLevel ? "Nova Compra" : "Nova Venda";
+  const modalTitleEdit = isClientLevel ? "Detalhes da Compra" : "Editar Venda";
+
   return (
     <div>
-      <PageHeader title="Vendas" buttonLabel="Adicionar Venda" onButtonClick={() => openModal()} />
+      <PageHeader 
+        title={pageTitle} 
+        buttonLabel={btnLabel} 
+        onButtonClick={() => openModal()} 
+      />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         {/* Search Bar */}
@@ -216,6 +252,7 @@ const Sales: React.FC = () => {
               <tr>
                 <th className="px-6 py-3 font-medium">#</th>
                 <th className="px-6 py-3 font-medium">Cliente</th>
+                <th className="px-6 py-3 font-medium">Responsável</th>
                 <th className="px-6 py-3 font-medium">Data</th>
                 <th className="px-6 py-3 font-medium">Itens</th>
                 <th className="px-6 py-3 font-medium">Faturado</th>
@@ -225,7 +262,7 @@ const Sales: React.FC = () => {
             </thead>
             <tbody>
               {sales.length === 0 ? (
-                 <tr><td colSpan={7} className="px-6 py-4 text-center text-gray-500">Nenhuma venda registrada.</td></tr>
+                 <tr><td colSpan={8} className="px-6 py-4 text-center text-gray-500">Nenhum registro encontrado.</td></tr>
               ) : (
                 sales.map((sale) => (
                     <tr key={sale.id} className="bg-white border-b hover:bg-gray-50">
@@ -236,6 +273,7 @@ const Sales: React.FC = () => {
                             {sale.client}
                         </div>
                     </td>
+                    <td className="px-6 py-4 text-gray-600 text-xs">{sale.responsible || '-'}</td>
                     <td className="px-6 py-4">{sale.date}</td>
                     <td className="px-6 py-4 text-gray-500">
                         {sale.products_list && sale.products_list.length > 0 
@@ -249,21 +287,38 @@ const Sales: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 font-bold text-gray-700">{sale.total}</td>
                     <td className="px-6 py-4 flex justify-center space-x-2">
-                         <button className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" title="Ver Detalhes"><Eye className="h-4 w-4" /></button>
-                        <button 
-                            className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600 transition-colors" 
-                            title="Editar"
-                            onClick={() => openModal(sale)}
-                        >
-                        <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button 
-                            className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600 transition-colors" 
-                            title="Excluir"
-                            onClick={() => handleDeleteClick(sale)}
-                        >
-                        <Trash2 className="h-4 w-4" />
-                        </button>
+                         {/* Cliente vê ícone de Olho se estiver fechado, ou Editar se estiver Aberto */}
+                         {(isClientLevel && sale.status !== 'Aberto') && (
+                             <button 
+                                className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" 
+                                title="Ver Detalhes"
+                                onClick={() => openModal(sale)}
+                             >
+                                 <Eye className="h-4 w-4" />
+                             </button>
+                         )}
+
+                         {/* Botões de Ação para Admin/Técnico ou Cliente se status Aberto */}
+                         {(!isClientLevel || (isClientLevel && sale.status === 'Aberto')) && (
+                             <>
+                                <button 
+                                    className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600 transition-colors" 
+                                    title="Editar"
+                                    onClick={() => openModal(sale)}
+                                >
+                                <Edit2 className="h-4 w-4" />
+                                </button>
+                                {(!isClientLevel) && (
+                                    <button 
+                                        className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600 transition-colors" 
+                                        title="Excluir"
+                                        onClick={() => handleDeleteClick(sale)}
+                                    >
+                                    <Trash2 className="h-4 w-4" />
+                                    </button>
+                                )}
+                             </>
+                         )}
                     </td>
                     </tr>
                 ))
@@ -277,7 +332,7 @@ const Sales: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={isEditing ? "Editar Venda" : "Nova Venda"}
+        title={isEditing ? modalTitleEdit : modalTitleNew}
       >
         <form onSubmit={handleSave} className="space-y-4">
             {/* Seleção de Cliente */}
@@ -288,30 +343,50 @@ const Sales: React.FC = () => {
                         type="text" 
                         name="client" 
                         required 
-                        readOnly
+                        readOnly={isClientLevel}
                         value={formData.client} 
                         placeholder="Selecione um cliente"
                         className="block w-full border border-gray-300 rounded-l-md p-2 bg-gray-50 cursor-pointer"
-                        onClick={() => setIsClientSelectOpen(true)}
+                        onClick={() => !isClientLevel && setIsClientSelectOpen(true)}
                     />
-                    <button 
-                        type="button"
-                        onClick={() => setIsClientSelectOpen(true)}
-                        className="bg-brand-blue text-white px-3 rounded-r-md hover:bg-blue-600"
-                    >
-                        <Search className="h-4 w-4" />
-                    </button>
+                    {!isClientLevel && (
+                        <button 
+                            type="button"
+                            onClick={() => setIsClientSelectOpen(true)}
+                            className="bg-brand-blue text-white px-3 rounded-r-md hover:bg-blue-600"
+                        >
+                            <Search className="h-4 w-4" />
+                        </button>
+                    )}
                 </div>
             </div>
+            
+            {!isClientLevel && (
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Responsável</label>
+                    <input 
+                        type="text" 
+                        name="responsible"
+                        value={formData.responsible} 
+                        onChange={handleChange}
+                        readOnly={isTechnicianLevel}
+                        className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${isTechnicianLevel ? 'bg-gray-100' : ''}`}
+                    />
+                </div>
+            )}
             
              <div className="grid grid-cols-2 gap-4">
                  <div>
                     <label className="block text-sm font-medium text-gray-700">Status</label>
-                    <select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
-                        <option value="Aberto">Aberto</option>
-                        <option value="Faturado">Faturado</option>
-                        <option value="Cancelado">Cancelado</option>
-                    </select>
+                    {isClientLevel ? (
+                        <input type="text" value={formData.status} readOnly className="mt-1 block w-full border border-gray-300 rounded-md p-2 bg-gray-100" />
+                    ) : (
+                        <select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                            <option value="Aberto">Aberto</option>
+                            <option value="Faturado">Faturado</option>
+                            <option value="Cancelado">Cancelado</option>
+                        </select>
+                    )}
                 </div>
                  <div>
                     <label className="block text-sm font-medium text-gray-700">Valor Total (Auto)</label>
@@ -322,14 +397,17 @@ const Sales: React.FC = () => {
             {/* Lista de Produtos */}
             <div className="border-t pt-4 mt-2">
                 <div className="flex justify-between items-center mb-2">
-                    <h4 className="text-sm font-medium text-gray-700">Itens da Venda</h4>
-                    <button 
-                        type="button" 
-                        onClick={() => setIsProductSelectOpen(true)}
-                        className="text-xs bg-green-50 text-green-700 px-3 py-1 rounded-full border border-green-200 hover:bg-green-100 flex items-center"
-                    >
-                        <Plus className="h-3 w-3 mr-1" /> Adicionar Item
-                    </button>
+                    <h4 className="text-sm font-medium text-gray-700">Itens da {isClientLevel ? 'Compra' : 'Venda'}</h4>
+                    {/* Permitir adicionar item se não for cliente OU se for cliente e status Aberto */}
+                    {(!isClientLevel || (isClientLevel && formData.status === 'Aberto')) && (
+                        <button 
+                            type="button" 
+                            onClick={() => setIsProductSelectOpen(true)}
+                            className="text-xs bg-green-50 text-green-700 px-3 py-1 rounded-full border border-green-200 hover:bg-green-100 flex items-center"
+                        >
+                            <Plus className="h-3 w-3 mr-1" /> Adicionar Item
+                        </button>
+                    )}
                 </div>
 
                 <div className="border rounded-md overflow-hidden bg-gray-50 min-h-[150px] max-h-[250px] overflow-y-auto">
@@ -354,24 +432,31 @@ const Sales: React.FC = () => {
                                     <tr key={item.id} className="bg-white">
                                         <td className="px-4 py-2">{item.name}</td>
                                         <td className="px-2 py-2 text-center">
-                                            <input 
-                                                type="number" 
-                                                min="1"
-                                                value={item.quantity}
-                                                onChange={(e) => updateProductQuantity(item.id, parseInt(e.target.value))}
-                                                className="w-12 text-center border rounded p-1 text-xs"
-                                            />
+                                            {/* Permitir editar quantidade se não for cliente ou cliente com status aberto */}
+                                            {(!isClientLevel || formData.status === 'Aberto') ? (
+                                                 <input 
+                                                    type="number" 
+                                                    min="1"
+                                                    value={item.quantity}
+                                                    onChange={(e) => updateProductQuantity(item.id, parseInt(e.target.value))}
+                                                    className="w-12 text-center border rounded p-1 text-xs"
+                                                />
+                                            ) : (
+                                                <span>{item.quantity}</span>
+                                            )}
                                         </td>
                                         <td className="px-2 py-2 text-right text-xs">{numberToCurrency(item.price)}</td>
                                         <td className="px-2 py-2 text-right font-medium text-xs">{numberToCurrency(item.price * item.quantity)}</td>
                                         <td className="px-2 py-2 text-center">
-                                            <button 
-                                                type="button" 
-                                                onClick={() => removeProduct(item.id)}
-                                                className="text-red-400 hover:text-red-600"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
+                                            {(!isClientLevel || formData.status === 'Aberto') && (
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => removeProduct(item.id)}
+                                                    className="text-red-400 hover:text-red-600"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -388,18 +473,20 @@ const Sales: React.FC = () => {
                     rows={2} 
                     value={formData.details} 
                     onChange={handleChange} 
+                    readOnly={isClientLevel && formData.status !== 'Aberto'}
                     className="mt-1 block w-full border border-gray-300 rounded-md p-2 text-sm"
                     placeholder="Informações adicionais..."
                 ></textarea>
             </div>
              <div className="flex justify-end pt-2">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md">Cancelar</button>
-                <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
+                {(!isClientLevel || formData.status === 'Aberto') && (
+                    <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
+                )}
             </div>
         </form>
       </Modal>
 
-      {/* Modal de Seleção de Cliente */}
       <Modal
          isOpen={isClientSelectOpen}
          onClose={() => setIsClientSelectOpen(false)}
@@ -431,7 +518,6 @@ const Sales: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Modal de Seleção de Produto */}
       <Modal
          isOpen={isProductSelectOpen}
          onClose={() => setIsProductSelectOpen(false)}
@@ -467,7 +553,6 @@ const Sales: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Modal de Confirmação de Exclusão */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}

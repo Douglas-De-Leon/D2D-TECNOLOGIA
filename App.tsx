@@ -13,6 +13,7 @@ import Files from './pages/Files';
 import Settings from './pages/Settings';
 import Warranties from './pages/Warranties';
 import GenericPage from './pages/GenericPage';
+import Profile from './pages/Profile';
 import Setup from './pages/Setup';
 import { initDB } from './services/db';
 import { SystemUser } from './types';
@@ -78,11 +79,15 @@ const App: React.FC = () => {
       return <Login onLoginSuccess={handleLogin} />;
   }
 
+  const isClient = user.level === 'client';
+
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Layout onLogout={handleLogout} userName={user.name} />}>
-          <Route index element={<Dashboard />} />
+        <Route path="/" element={<Layout onLogout={handleLogout} user={user} />}>
+          {/* Se for Cliente, a raiz redireciona para Ordens, caso contrário, Dashboard */}
+          <Route index element={isClient ? <Navigate to="/orders" replace /> : <Dashboard />} />
+          
           <Route path="clients" element={<Clients />} />
           <Route path="products" element={<Products />} />
           <Route path="services" element={<Services />} />
@@ -90,8 +95,12 @@ const App: React.FC = () => {
           <Route path="sales" element={<Sales />} />
           <Route path="finance" element={<Finance />} />
           <Route path="files" element={<Files />} />
-          <Route path="settings" element={<Settings />} />
+          
+          {/* Proteção de Rota: Cliente não acessa Configurações */}
+          <Route path="settings" element={isClient ? <Navigate to="/orders" replace /> : <Settings />} />
+          
           <Route path="warranties" element={<Warranties />} />
+          <Route path="profile" element={<Profile />} />
           
           {/* Generic/Placeholder Routes */}
           <Route path="reports" element={<GenericPage title="Relatórios" />} />

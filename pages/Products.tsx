@@ -3,10 +3,11 @@ import { Edit2, Trash2, Search, Package, AlertTriangle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
-import { Product } from '../types';
+import { Product, SystemUser } from '../types';
 
 const Products: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
   
   // Estados para Adicionar/Editar
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,8 +30,14 @@ const Products: React.FC = () => {
   };
 
   useEffect(() => {
+    const stored = localStorage.getItem('mapos_user');
+    if (stored) {
+        setCurrentUser(JSON.parse(stored));
+    }
     loadData();
   }, []);
+
+  const isClient = currentUser?.level === 'client';
 
   const openModal = (product?: Product) => {
     if (product) {
@@ -86,7 +93,12 @@ const Products: React.FC = () => {
 
   return (
     <div>
-      <PageHeader title="Produtos" buttonLabel="Adicionar Produto" onButtonClick={() => openModal()} />
+      <PageHeader 
+        title="Produtos" 
+        buttonLabel="Adicionar Produto" 
+        onButtonClick={() => openModal()}
+        showButton={!isClient} // Clientes não veem o botão de adicionar
+      />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
@@ -105,12 +117,12 @@ const Products: React.FC = () => {
                 <th className="px-6 py-3 font-medium">Unidade</th>
                 <th className="px-6 py-3 font-medium">Preço Venda</th>
                 <th className="px-6 py-3 font-medium">Estoque</th>
-                <th className="px-6 py-3 font-medium text-center">Ações</th>
+                {!isClient && <th className="px-6 py-3 font-medium text-center">Ações</th>}
               </tr>
             </thead>
             <tbody>
               {products.length === 0 ? (
-                 <tr><td colSpan={6} className="px-6 py-4 text-center text-gray-500">Nenhum produto encontrado.</td></tr>
+                 <tr><td colSpan={isClient ? 5 : 6} className="px-6 py-4 text-center text-gray-500">Nenhum produto encontrado.</td></tr>
               ) : (
                 products.map((product) => (
                     <tr key={product.id} className="bg-white border-b hover:bg-gray-50">
@@ -128,25 +140,27 @@ const Products: React.FC = () => {
                             {product.stock}
                         </span>
                     </td>
-                    <td className="px-6 py-4 flex justify-center space-x-2">
-                        <button 
-                            className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
-                            title="Editar"
-                            onClick={() => openModal(product)}
-                        >
-                            <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button 
-                            className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
-                            title="Excluir"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteClick(product);
-                            }}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </button>
-                    </td>
+                    {!isClient && (
+                        <td className="px-6 py-4 flex justify-center space-x-2">
+                            <button 
+                                className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
+                                title="Editar"
+                                onClick={() => openModal(product)}
+                            >
+                                <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button 
+                                className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
+                                title="Excluir"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteClick(product);
+                                }}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </button>
+                        </td>
+                    )}
                     </tr>
                 ))
               )}

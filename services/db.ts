@@ -3,12 +3,13 @@ import { Client, Product, Service, Order, Transaction, CompanySettings, Sale, Fi
 
 // O initDB verifica a conexão.
 export const initDB = async (): Promise<{ success: boolean; error?: any }> => {
-    // 1. Verifica se a tabela 'users' existe (crítico para autenticação)
-    const { error: usersError } = await supabase.from('users').select('id').limit(1);
+    // 1. Verifica se a tabela 'users' existe E se tem a coluna avatar_url
+    // Isso garante que o script de atualização do banco foi rodado para suportar fotos de perfil
+    const { error: usersError } = await supabase.from('users').select('avatar_url').limit(1);
     
     if (usersError) {
-        console.error("Erro ao verificar tabela users:", JSON.stringify(usersError, null, 2));
-        // Retorna falha para que a UI possa mostrar a tela de configuração
+        console.error("Erro ao verificar tabela users ou coluna avatar_url:", JSON.stringify(usersError, null, 2));
+        // Retorna falha para que a UI possa mostrar a tela de configuração (Setup)
         return { success: false, error: usersError };
     }
 

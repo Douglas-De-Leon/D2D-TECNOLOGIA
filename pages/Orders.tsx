@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Edit2, Trash2, Search, Eye, UserPlus, FileText, Package, Plus, X, Wrench, AlertTriangle, Printer } from 'lucide-react';
+import { Edit2, Trash2, Search, Eye, UserPlus, FileText, Package, Plus, X, Wrench, AlertTriangle, Printer, Paperclip, UploadCloud } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem, getSettings } from '../services/db';
-import { Order, Client, Service, Product, OrderItem } from '../types';
+import { Order, Client, Service, Product, OrderItem, SystemUser, FileDocument } from '../types';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
 const Orders: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
   
   // Listas auxiliares para seleção
   const [clientsList, setClientsList] = useState<Client[]>([]);
@@ -29,6 +30,9 @@ const Orders: React.FC = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
 
+  // Estado para Anexo
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   const [formData, setFormData] = useState<Order>({
     client: '',
     responsible: '',
@@ -44,10 +48,21 @@ const Orders: React.FC = () => {
 
   const [isEditing, setIsEditing] = useState(false);
 
+  useEffect(() => {
+      const stored = localStorage.getItem('mapos_user');
+      if (stored) {
+          setCurrentUser(JSON.parse(stored));
+      }
+      loadData();
+      loadAuxData();
+  }, []);
+
+  const isClientLevel = currentUser?.level === 'client';
+  const isTechnicianLevel = currentUser?.level === 'technician';
+
   // --- Helpers de Moeda ---
   const currencyToNumber = (currencyStr: string): number => {
     if (!currencyStr) return 0;
-    // Remove "R$", espaços, pontos de milhar e troca vírgula por ponto
     const cleanStr = currencyStr.replace(/[R$\s.]/g, '').replace(',', '.');
     return parseFloat(cleanStr) || 0;
   };
@@ -58,7 +73,24 @@ const Orders: React.FC = () => {
 
   const loadData = async () => {
     const data = await getAll<Order>('orders');
-    setOrders(data.sort((a, b) => (b.id || 0) - (a.id || 0)));
+    
+    // Obtém usuário atual novamente para garantir (closure issue in useEffect sometimes)
+    const stored = localStorage.getItem('mapos_user');
+    const user: SystemUser | null = stored ? JSON.parse(stored) : null;
+    
+    let filteredData = data.sort((a, b) => (b.id || 0) - (a.id || 0));
+
+    // FILTRO
+    if (user) {
+        if (user.level === 'client') {
+             filteredData = filteredData.filter(o => o.client.toLowerCase() === user.name.toLowerCase());
+        } else if (user.level === 'technician') {
+             // Técnico vê apenas OS onde ele é responsável
+             filteredData = filteredData.filter(o => o.responsible === user.name);
+        }
+    }
+
+    setOrders(filteredData);
   };
 
   const loadAuxData = async () => {
@@ -69,11 +101,6 @@ const Orders: React.FC = () => {
       setServicesList(services);
       setProductsList(products);
   }
-
-  useEffect(() => {
-    loadData();
-    loadAuxData();
-  }, []);
 
   // --- Cálculo Automático do Total ---
   useEffect(() => {
@@ -91,8 +118,8 @@ const Orders: React.FC = () => {
 
   const openModal = (order?: Order) => {
     setActiveTab('details');
+    setSelectedFile(null); // Reset file
     if (order) {
-      // Garantir que as listas existam, mesmo que vazias (para compatibilidade com registros antigos)
       setFormData({
         ...order,
         services_list: order.services_list || [],
@@ -101,8 +128,8 @@ const Orders: React.FC = () => {
       setIsEditing(true);
     } else {
       setFormData({
-        client: '',
-        responsible: '',
+        client: isClientLevel && currentUser ? currentUser.name : '', // Auto-fill se for cliente
+        responsible: isTechnicianLevel && currentUser ? currentUser.name : '', // Auto-fill se for técnico
         dateInit: new Date().toLocaleDateString('pt-BR'),
         status: 'Aberto',
         statusColor: 'bg-green-500',
@@ -131,10 +158,38 @@ const Orders: React.FC = () => {
     setFormData({ ...formData, status, statusColor: color });
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+          const file = e.target.files[0];
+          if (file.type !== 'application/pdf') {
+              alert('Apenas arquivos PDF são permitidos.');
+              e.target.value = '';
+              return;
+          }
+          setSelectedFile(file);
+      }
+  };
+
+  const saveFileAttachment = async (osId: number) => {
+      if (!selectedFile || !currentUser) return;
+
+      const fileData: FileDocument = {
+          name: selectedFile.name,
+          client: formData.client || currentUser.name,
+          date: new Date().toLocaleDateString('pt-BR'),
+          description: `Anexo da OS #${osId}: ${formData.description?.substring(0, 30)}...`,
+          type: selectedFile.name.split('.').pop()?.toLowerCase() || 'file',
+          size: (selectedFile.size / 1024).toFixed(2) + ' KB',
+          url: URL.createObjectURL(selectedFile) // Em um app real, seria o upload para storage
+      };
+
+      await addItem('files', fileData);
+      console.log('Arquivo anexado com sucesso');
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // Atualiza o campo "service" principal com um resumo para a tabela
       const servicesCount = formData.services_list?.length || 0;
       const productsCount = formData.products_list?.length || 0;
       const summaryService = servicesCount > 0 
@@ -146,11 +201,20 @@ const Orders: React.FC = () => {
         service: summaryService
       };
 
+      let savedId = 0;
+
       if (isEditing && formData.id) {
         await updateItem('orders', dataToSave);
+        savedId = formData.id;
       } else {
-        await addItem('orders', dataToSave);
+        savedId = await addItem('orders', dataToSave);
       }
+
+      // Se houver arquivo para salvar e for uma criação (ou edição onde o user quis anexar algo novo)
+      if (selectedFile) {
+          await saveFileAttachment(savedId);
+      }
+
       setIsModalOpen(false);
       loadData();
     } catch (error) {
@@ -159,13 +223,11 @@ const Orders: React.FC = () => {
     }
   };
 
-  // Abre o modal de confirmação
   const handleDeleteClick = (order: Order) => {
     setOrderToDelete(order);
     setIsDeleteModalOpen(true);
   };
 
-  // Executa a exclusão de fato
   const confirmDelete = async () => {
     if (orderToDelete && orderToDelete.id) {
         const success = await deleteItem('orders', orderToDelete.id);
@@ -188,18 +250,13 @@ const Orders: React.FC = () => {
     try {
         const settings = await getSettings();
         const doc = new jsPDF();
-
-        // --- Configurações Visuais ---
         const pageWidth = doc.internal.pageSize.getWidth();
         const margin = 14;
-        const lineStart = 45;
         let currentY = 15;
 
-        // --- Cabeçalho da Empresa ---
         doc.setFontSize(18);
         doc.setFont("helvetica", "bold");
         doc.text(settings?.name || "Empresa Exemplo", margin, currentY);
-        
         currentY += 6;
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
@@ -221,66 +278,44 @@ const Orders: React.FC = () => {
         } else {
             currentY += 3;
         }
-
-        // Linha divisória
         doc.setLineWidth(0.5);
         doc.line(margin, currentY, pageWidth - margin, currentY);
         currentY += 8;
-
-        // --- Título da OS e Status ---
         doc.setFontSize(16);
         doc.setFont("helvetica", "bold");
         doc.text(`Ordem de Serviço Nº ${order.id}`, margin, currentY);
-        
-        // Status alinhado à direita
         doc.setFontSize(12);
         doc.setTextColor(100);
         const statusText = `Status: ${order.status}`;
         const statusWidth = doc.getTextWidth(statusText);
         doc.text(statusText, pageWidth - margin - statusWidth, currentY);
-        doc.setTextColor(0); // Reset cor
-
+        doc.setTextColor(0);
         currentY += 10;
-
-        // --- Dados do Cliente e Responsável ---
         doc.setFontSize(10);
         doc.setFont("helvetica", "bold");
         doc.text("Detalhes do Cliente", margin, currentY);
         doc.text("Detalhes do Serviço", pageWidth / 2 + 5, currentY);
-        
         currentY += 5;
         doc.setFont("helvetica", "normal");
-        
-        // Coluna Esquerda
         doc.text(`Cliente: ${order.client}`, margin, currentY);
         currentY += 5;
         doc.text(`Data Entrada: ${order.dateInit}`, margin, currentY);
-        
-        // Coluna Direita (resetando Y para alinhar)
         const rightColX = pageWidth / 2 + 5;
         currentY -= 5; 
         doc.text(`Técnico Responsável: ${order.responsible || 'Não informado'}`, rightColX, currentY);
         currentY += 10;
-
-        // --- Descrição ---
         doc.setFillColor(245, 245, 245);
         doc.rect(margin, currentY, pageWidth - (margin * 2), 15, 'F');
         doc.setFont("helvetica", "bold");
         doc.text("Descrição do Problema / Serviço:", margin + 2, currentY + 5);
         doc.setFont("helvetica", "normal");
-        
-        // Split text para caber na largura
         const descLines = doc.splitTextToSize(order.description || "Sem descrição.", pageWidth - (margin * 2) - 4);
         doc.text(descLines, margin + 2, currentY + 10);
-        
         currentY += 25;
-
-        // --- Tabela de Produtos ---
         if (order.products_list && order.products_list.length > 0) {
             doc.setFont("helvetica", "bold");
             doc.text("Produtos Utilizados", margin, currentY);
             currentY += 2;
-            
             autoTable(doc, {
                 startY: currentY,
                 head: [['Produto', 'Qtd', 'Preço Unit.', 'Subtotal']],
@@ -291,80 +326,60 @@ const Orders: React.FC = () => {
                     numberToCurrency(p.price * p.quantity)
                 ]),
                 theme: 'striped',
-                headStyles: { fillColor: [59, 130, 246] }, // Brand Blue
+                headStyles: { fillColor: [59, 130, 246] },
             });
-            // Atualiza Y baseado no final da tabela
             currentY = (doc as any).lastAutoTable.finalY + 10;
         }
-
-        // --- Tabela de Serviços ---
         if (order.services_list && order.services_list.length > 0) {
             doc.setFont("helvetica", "bold");
             doc.text("Serviços Realizados", margin, currentY);
             currentY += 2;
-            
             autoTable(doc, {
                 startY: currentY,
                 head: [['Serviço', 'Preço', 'Subtotal']],
                 body: order.services_list.map(s => [
                     s.name,
                     numberToCurrency(s.price),
-                    numberToCurrency(s.price * s.quantity) // Qtd é sempre 1 no modal atual, mas preparado para futuro
+                    numberToCurrency(s.price * s.quantity)
                 ]),
                 theme: 'striped',
                 headStyles: { fillColor: [59, 130, 246] },
             });
             currentY = (doc as any).lastAutoTable.finalY + 10;
         }
-
-        // --- Totais ---
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
         const totalText = `Valor Total: ${order.total}`;
         const totalWidth = doc.getTextWidth(totalText);
         doc.text(totalText, pageWidth - margin - totalWidth, currentY);
-
-        // --- Termos de Garantia (Footer) ---
         currentY += 20;
-        
-        if (currentY > 250) { // Se estiver muito em baixo, cria nova página
+        if (currentY > 250) {
             doc.addPage();
             currentY = 20;
         }
-
         doc.setLineWidth(0.5);
         doc.line(margin, currentY, pageWidth - margin, currentY);
         currentY += 5;
-
         doc.setFontSize(8);
         doc.setFont("helvetica", "bold");
         doc.text("Termos de Garantia e Condições:", margin, currentY);
         currentY += 4;
         doc.setFont("helvetica", "normal");
-        
-        const warranty = settings?.warrantyText || "Garantia padrão de 90 dias conforme lei vigente.";
+        const warranty = settings?.warrantyText || "Garantia padrão de 90 dias.";
         const warrantyLines = doc.splitTextToSize(warranty, pageWidth - (margin * 2));
         doc.text(warrantyLines, margin, currentY);
-
-        // --- Assinatura ---
         const pageHeight = doc.internal.pageSize.getHeight();
         const signY = pageHeight - 30;
-        
         doc.line(pageWidth / 2 - 40, signY, pageWidth / 2 + 40, signY);
         doc.setFontSize(8);
         doc.text("Assinatura do Cliente", pageWidth / 2, signY + 5, { align: "center" });
-
-        // Salvar PDF
         doc.save(`OS_${order.id}_${order.client}.pdf`);
-
     } catch (error) {
         console.error("Erro ao gerar PDF", error);
-        alert("Erro ao gerar PDF. Verifique o console.");
+        alert("Erro ao gerar PDF.");
     }
   };
 
-  // --- Funções de Seleção e Manipulação de Listas ---
-  
   const selectClient = (clientName: string) => {
       setFormData({ ...formData, client: clientName });
       setIsClientSelectOpen(false);
@@ -374,18 +389,14 @@ const Orders: React.FC = () => {
   const addService = (service: Service) => {
       const priceNumber = currencyToNumber(service.price);
       const newItem: OrderItem = {
-          id: Math.random().toString(36).substr(2, 9), // ID Temp para UI
+          id: Math.random().toString(36).substr(2, 9),
           originalId: service.id,
           name: service.name,
           price: priceNumber,
           quantity: 1,
           type: 'service'
       };
-
-      setFormData(prev => ({
-          ...prev,
-          services_list: [...(prev.services_list || []), newItem]
-      }));
+      setFormData(prev => ({ ...prev, services_list: [...(prev.services_list || []), newItem] }));
       setIsServiceSelectOpen(false);
       setSearchTerm('');
   };
@@ -397,14 +408,10 @@ const Orders: React.FC = () => {
           originalId: product.id,
           name: product.name,
           price: priceNumber,
-          quantity: 1, // Padrão 1
+          quantity: 1,
           type: 'product'
       };
-
-      setFormData(prev => ({
-          ...prev,
-          products_list: [...(prev.products_list || []), newItem]
-      }));
+      setFormData(prev => ({ ...prev, products_list: [...(prev.products_list || []), newItem] }));
       setIsProductSelectOpen(false);
       setSearchTerm('');
   };
@@ -429,7 +436,11 @@ const Orders: React.FC = () => {
 
   return (
     <div>
-      <PageHeader title="Ordens de Serviço" buttonLabel="Adicionar OS" onButtonClick={() => openModal()} />
+      <PageHeader 
+        title="Ordens de Serviço" 
+        buttonLabel="Adicionar OS" 
+        onButtonClick={() => openModal()} 
+      />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -480,20 +491,24 @@ const Orders: React.FC = () => {
                         >
                             <Printer className="h-4 w-4" />
                         </button>
-                        <button 
-                            className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
-                            title="Editar"
-                            onClick={() => openModal(os)}
-                        >
-                            <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button 
-                            className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
-                            title="Excluir"
-                            onClick={() => handleDeleteClick(os)}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </button>
+                        {(!isClientLevel || os.status === 'Aberto') && (
+                             <button 
+                                className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
+                                title="Editar"
+                                onClick={() => openModal(os)}
+                            >
+                                <Edit2 className="h-4 w-4" />
+                            </button>
+                        )}
+                        {!isClientLevel && (
+                             <button 
+                                className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
+                                title="Excluir"
+                                onClick={() => handleDeleteClick(os)}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </button>
+                        )}
                     </td>
                     </tr>
                 ))
@@ -503,15 +518,12 @@ const Orders: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Order Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={isEditing ? "Editar OS" : "Nova Ordem de Serviço"}
       >
         <form onSubmit={handleSave} className="space-y-4">
-            
-            {/* Tabs Header */}
             <div className="flex border-b border-gray-200 mb-4">
                 <button
                     type="button"
@@ -536,9 +548,7 @@ const Orders: React.FC = () => {
                 </button>
             </div>
 
-            {/* TAB: GERAL */}
             <div className={activeTab === 'details' ? 'block' : 'hidden'}>
-                {/* Cliente Selection */}
                 <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700">Cliente</label>
                     <div className="flex mt-1">
@@ -546,23 +556,24 @@ const Orders: React.FC = () => {
                             type="text" 
                             name="client" 
                             required 
-                            readOnly
+                            readOnly={isClientLevel} // Clientes não podem mudar o cliente
                             value={formData.client} 
                             placeholder="Selecione um cliente"
                             className="block w-full border border-gray-300 rounded-l-md p-2 bg-gray-50 cursor-pointer"
-                            onClick={() => setIsClientSelectOpen(true)}
+                            onClick={() => !isClientLevel && setIsClientSelectOpen(true)}
                         />
-                        <button 
-                            type="button"
-                            onClick={() => setIsClientSelectOpen(true)}
-                            className="bg-brand-blue text-white px-3 rounded-r-md hover:bg-blue-600"
-                        >
-                            <Search className="h-4 w-4" />
-                        </button>
+                         {!isClientLevel && (
+                            <button 
+                                type="button"
+                                onClick={() => setIsClientSelectOpen(true)}
+                                className="bg-brand-blue text-white px-3 rounded-r-md hover:bg-blue-600"
+                            >
+                                <Search className="h-4 w-4" />
+                            </button>
+                        )}
                     </div>
                 </div>
 
-                {/* Description */}
                 <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700">Descrição do Problema / Serviço</label>
                     <textarea 
@@ -578,7 +589,14 @@ const Orders: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Responsável</label>
-                        <input type="text" name="responsible" value={formData.responsible} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+                        <input 
+                            type="text" 
+                            name="responsible" 
+                            value={formData.responsible} 
+                            onChange={handleChange} 
+                            readOnly={isClientLevel || isTechnicianLevel} 
+                            className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${(isClientLevel || isTechnicianLevel) ? 'bg-gray-100' : ''}`}
+                        />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Data Inicial</label>
@@ -588,13 +606,17 @@ const Orders: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4 mt-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Status</label>
-                        <select name="status" value={formData.status} onChange={handleStatusChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
-                            <option value="Aberto">Aberto</option>
-                            <option value="Orçamento">Orçamento</option>
-                            <option value="Em Andamento">Em Andamento</option>
-                            <option value="Finalizado">Finalizado</option>
-                            <option value="Cancelado">Cancelado</option>
-                        </select>
+                         {isClientLevel ? (
+                            <input type="text" value={formData.status} readOnly className="mt-1 block w-full border border-gray-300 rounded-md p-2 bg-gray-100" />
+                        ) : (
+                             <select name="status" value={formData.status} onChange={handleStatusChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2">
+                                <option value="Aberto">Aberto</option>
+                                <option value="Orçamento">Orçamento</option>
+                                <option value="Em Andamento">Em Andamento</option>
+                                <option value="Finalizado">Finalizado</option>
+                                <option value="Cancelado">Cancelado</option>
+                            </select>
+                        )}
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Valor Total (Automático)</label>
@@ -607,10 +629,28 @@ const Orders: React.FC = () => {
                         />
                     </div>
                 </div>
+
+                {/* Seção de Anexo para Clientes ou Novos Pedidos */}
+                <div className="mt-4 border-t pt-4">
+                     <label className="block text-sm font-medium text-gray-700 mb-2">Anexo / Arquivo (Opcional)</label>
+                     <div className="flex items-center space-x-2">
+                         <label className="cursor-pointer bg-white border border-gray-300 rounded-md px-3 py-2 flex items-center hover:bg-gray-50 text-sm text-gray-600 shadow-sm">
+                             <Paperclip className="h-4 w-4 mr-2 text-gray-400"/>
+                             {selectedFile ? selectedFile.name : "Selecionar arquivo..."}
+                             <input type="file" className="hidden" accept="application/pdf" onChange={handleFileChange} />
+                         </label>
+                         {selectedFile && (
+                             <button type="button" onClick={() => setSelectedFile(null)} className="text-red-400 hover:text-red-600">
+                                 <X className="h-4 w-4" />
+                             </button>
+                         )}
+                     </div>
+                     <p className="text-xs text-gray-500 mt-1">Apenas arquivos PDF são permitidos.</p>
+                </div>
             </div>
 
-            {/* TAB: SERVIÇOS */}
             <div className={activeTab === 'services' ? 'block' : 'hidden'}>
+                {/* Permite cliente adicionar também */}
                 <div className="flex justify-end mb-2">
                     <button 
                         type="button" 
@@ -642,13 +682,16 @@ const Orders: React.FC = () => {
                                         <td className="px-4 py-2">{item.name}</td>
                                         <td className="px-4 py-2 text-right">{numberToCurrency(item.price)}</td>
                                         <td className="px-4 py-2 text-center">
-                                            <button 
-                                                type="button" 
-                                                onClick={() => removeItem(item.id, 'service')}
-                                                className="text-red-400 hover:text-red-600"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
+                                            {/* Permite remover se não for cliente ou se o status for Aberto */}
+                                            {(!isClientLevel || formData.status === 'Aberto') && (
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => removeItem(item.id, 'service')}
+                                                    className="text-red-400 hover:text-red-600"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -658,10 +701,10 @@ const Orders: React.FC = () => {
                 </div>
             </div>
 
-            {/* TAB: PRODUTOS */}
             <div className={activeTab === 'products' ? 'block' : 'hidden'}>
+                 {/* Permite cliente adicionar também */}
                 <div className="flex justify-end mb-2">
-                     <button 
+                    <button 
                         type="button" 
                         onClick={() => setIsProductSelectOpen(true)}
                         className="flex items-center text-xs bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-200 hover:bg-green-100"
@@ -695,13 +738,15 @@ const Orders: React.FC = () => {
                                         <td className="px-4 py-2 text-right">{numberToCurrency(item.price)}</td>
                                         <td className="px-4 py-2 text-right font-medium">{numberToCurrency(item.price * item.quantity)}</td>
                                         <td className="px-4 py-2 text-center">
-                                            <button 
-                                                type="button" 
-                                                onClick={() => removeItem(item.id, 'product')}
-                                                className="text-red-400 hover:text-red-600"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
+                                            {(!isClientLevel || formData.status === 'Aberto') && (
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => removeItem(item.id, 'product')}
+                                                    className="text-red-400 hover:text-red-600"
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -718,7 +763,6 @@ const Orders: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Modal de Seleção de Cliente */}
       <Modal
          isOpen={isClientSelectOpen}
          onClose={() => setIsClientSelectOpen(false)}
@@ -750,7 +794,6 @@ const Orders: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Modal de Seleção de Serviço */}
       <Modal
          isOpen={isServiceSelectOpen}
          onClose={() => setIsServiceSelectOpen(false)}
@@ -782,7 +825,6 @@ const Orders: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Modal de Seleção de Produto */}
       <Modal
          isOpen={isProductSelectOpen}
          onClose={() => setIsProductSelectOpen(false)}
@@ -818,7 +860,6 @@ const Orders: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Modal de Confirmação de Exclusão */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}

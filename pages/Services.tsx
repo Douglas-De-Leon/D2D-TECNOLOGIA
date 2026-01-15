@@ -3,10 +3,11 @@ import { Edit2, Trash2, Search, AlertTriangle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
-import { Service } from '../types';
+import { Service, SystemUser } from '../types';
 
 const Services: React.FC = () => {
   const [services, setServices] = useState<Service[]>([]);
+  const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
   
   // Estados para Adicionar/Editar
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,8 +28,14 @@ const Services: React.FC = () => {
   };
 
   useEffect(() => {
+    const stored = localStorage.getItem('mapos_user');
+    if (stored) {
+        setCurrentUser(JSON.parse(stored));
+    }
     loadData();
   }, []);
+
+  const isClient = currentUser?.level === 'client';
 
   const openModal = (service?: Service) => {
     if (service) {
@@ -83,7 +90,12 @@ const Services: React.FC = () => {
 
   return (
     <div>
-      <PageHeader title="Serviços" buttonLabel="Adicionar Serviço" onButtonClick={() => openModal()} />
+      <PageHeader 
+        title="Serviços" 
+        buttonLabel="Adicionar Serviço" 
+        onButtonClick={() => openModal()} 
+        showButton={!isClient} // Clientes não veem o botão de adicionar
+      />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
@@ -101,12 +113,12 @@ const Services: React.FC = () => {
                 <th className="px-6 py-3 font-medium">Nome</th>
                 <th className="px-6 py-3 font-medium">Descrição</th>
                 <th className="px-6 py-3 font-medium">Preço</th>
-                <th className="px-6 py-3 font-medium text-center">Ações</th>
+                {!isClient && <th className="px-6 py-3 font-medium text-center">Ações</th>}
               </tr>
             </thead>
             <tbody>
               {services.length === 0 ? (
-                 <tr><td colSpan={5} className="px-6 py-4 text-center text-gray-500">Nenhum serviço encontrado.</td></tr>
+                 <tr><td colSpan={isClient ? 4 : 5} className="px-6 py-4 text-center text-gray-500">Nenhum serviço encontrado.</td></tr>
               ) : (
                 services.map((service) => (
                     <tr key={service.id} className="bg-white border-b hover:bg-gray-50">
@@ -114,25 +126,27 @@ const Services: React.FC = () => {
                     <td className="px-6 py-4 font-medium">{service.name}</td>
                     <td className="px-6 py-4 text-gray-500">{service.description}</td>
                     <td className="px-6 py-4 font-medium text-gray-700">{service.price}</td>
-                    <td className="px-6 py-4 flex justify-center space-x-2">
-                        <button 
-                            className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
-                            title="Editar"
-                            onClick={() => openModal(service)}
-                        >
-                            <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button 
-                            className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
-                            title="Excluir"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteClick(service);
-                            }}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </button>
-                    </td>
+                    {!isClient && (
+                        <td className="px-6 py-4 flex justify-center space-x-2">
+                            <button 
+                                className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
+                                title="Editar"
+                                onClick={() => openModal(service)}
+                            >
+                                <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button 
+                                className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
+                                title="Excluir"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteClick(service);
+                                }}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </button>
+                        </td>
+                    )}
                     </tr>
                 ))
               )}

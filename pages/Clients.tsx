@@ -3,6 +3,7 @@ import { Edit2, Trash2, Search, MapPin, User, Building, AlertTriangle } from 'lu
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
+import { supabase } from '../services/supabase';
 import { Client } from '../types';
 
 const Clients: React.FC = () => {
@@ -68,6 +69,24 @@ const Clients: React.FC = () => {
         await updateItem('clients', formData);
       } else {
         await addItem('clients', formData);
+        
+        // --- AUTO-CRIAÇÃO DE USUÁRIO ---
+        if (formData.email && formData.cpf && formData.type === 'Cliente') {
+            // Verifica se usuário já existe
+            const { data: existingUser } = await supabase.from('users').select('id').eq('email', formData.email).maybeSingle();
+            
+            if (!existingUser) {
+                // Cria usuário com acesso nível 'client'
+                await supabase.from('users').insert({
+                    name: formData.name,
+                    email: formData.email,
+                    password: formData.cpf, // Senha padrão = CPF
+                    level: 'client',
+                    avatar_url: ''
+                });
+                console.log("Usuário de acesso criado automaticamente para o cliente.");
+            }
+        }
       }
       setIsModalOpen(false);
       loadData();
@@ -189,7 +208,6 @@ const Clients: React.FC = () => {
       >
         <form id="client-form" onSubmit={handleSave} className="space-y-4">
           
-          {/* Tipo e Nome */}
           <div className="grid grid-cols-4 gap-4">
               <div className="col-span-1">
                 <label className="block text-sm font-medium text-gray-700">Tipo</label>
@@ -222,6 +240,8 @@ const Clients: React.FC = () => {
                 <input
                 type="text"
                 name="cpf"
+                required
+                placeholder="Para login (será a senha inicial)"
                 value={formData.cpf}
                 onChange={handleChange}
                 className="mt-1 block w-full rounded-md border border-gray-300 p-2 text-sm"
@@ -244,13 +264,14 @@ const Clients: React.FC = () => {
             <input
               type="email"
               name="email"
+              required
+              placeholder="Para login (deve ser único)"
               value={formData.email}
               onChange={handleChange}
               className="mt-1 block w-full rounded-md border border-gray-300 p-2 text-sm"
             />
           </div>
 
-          {/* Divisor Endereço */}
           <div className="pt-2 pb-1 border-b border-gray-100 mb-2">
             <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center">
                 <MapPin className="h-3 w-3 mr-1"/> Endereço
@@ -346,7 +367,6 @@ const Clients: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Modal de Confirmação de Exclusão */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}

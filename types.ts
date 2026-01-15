@@ -30,7 +30,8 @@ export interface SystemUser {
     name: string;
     email: string;
     password?: string; // Only used for auth verification, not stored in state ideally
-    level: 'admin' | 'user';
+    level: 'admin' | 'user' | 'client' | 'technician';
+    avatar_url?: string;
 }
 
 export interface Client {
@@ -96,6 +97,7 @@ export interface Order {
 export interface Sale {
   id?: number;
   client: string;
+  responsible?: string; // Adicionado para vincular ao funcionário
   date: string;
   total: string;
   status: 'Faturado' | 'Aberto' | 'Cancelado';

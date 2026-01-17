@@ -20,7 +20,7 @@ const Files: React.FC = () => {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<FileDocument | null>(null);
 
-  // --- Modal de Exclusão (Novo) ---
+  // Estados para Modal de Exclusão Visual
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<FileDocument | null>(null);
   
@@ -47,24 +47,20 @@ const Files: React.FC = () => {
   const isClientLevel = currentUser?.level === 'client';
 
   const loadData = async () => {
-    try {
-      const data = await getAll<FileDocument>('files');
-      const clients = await getAll<Client>('clients');
-      const stored = localStorage.getItem('mapos_user');
-      const user: SystemUser | null = stored ? JSON.parse(stored) : null;
-      
-      let filteredData = data.sort((a, b) => (b.id || 0) - (a.id || 0));
+    const data = await getAll<FileDocument>('files');
+    const clients = await getAll<Client>('clients');
+    const stored = localStorage.getItem('mapos_user');
+    const user: SystemUser | null = stored ? JSON.parse(stored) : null;
+    
+    let filteredData = data.sort((a, b) => (b.id || 0) - (a.id || 0));
 
-      // FILTRO PARA CLIENTE
-      if (user && user.level === 'client') {
-          filteredData = filteredData.filter(f => f.client && f.client.toLowerCase() === user.name.toLowerCase());
-      }
-
-      setFiles(filteredData);
-      setClientsList(clients);
-    } catch (e) {
-      console.error("Erro ao carregar dados:", e);
+    // FILTRO PARA CLIENTE
+    if (user && user.level === 'client') {
+        filteredData = filteredData.filter(f => f.client && f.client.toLowerCase() === user.name.toLowerCase());
     }
+
+    setFiles(filteredData);
+    setClientsList(clients);
   };
 
   const openModal = (file?: FileDocument) => {
@@ -107,39 +103,28 @@ const Files: React.FC = () => {
     }
   };
 
-  // --- Lógica de Exclusão com Modal Visual ---
-  
-  // 1. Abre o modal de confirmação
+  // --- Lógica de Exclusão Visual ---
   const handleDeleteClick = (file: FileDocument) => {
     setFileToDelete(file);
     setIsDeleteModalOpen(true);
   };
 
-  // 2. Confirma a exclusão
   const confirmDelete = async () => {
     if (fileToDelete && fileToDelete.id) {
         try {
             const success = await deleteItem('files', fileToDelete.id);
-            
             if (success) {
-                // Remove da lista local (interface snappy)
                 setFiles(prev => prev.filter(f => f.id !== fileToDelete.id));
-                
-                // Fecha todos os modais possíveis onde o botão de excluir possa ter sido clicado
                 setIsDeleteModalOpen(false);
-                setIsModalOpen(false);
-                setIsPreviewModalOpen(false);
-                setPreviewFile(null);
                 setFileToDelete(null);
-                
-                // Recarrega dados para garantir sincronia
-                await loadData();
+                // Fecha modais de visualização se estiverem abertos
+                setIsPreviewModalOpen(false);
             } else {
-                alert("Erro ao excluir o arquivo.");
+                alert("Erro ao excluir arquivo.");
             }
         } catch (error) {
             console.error("Erro ao excluir:", error);
-            alert("Ocorreu um erro ao tentar excluir.");
+            alert("Ocorreu um erro inesperado ao excluir.");
         }
     }
   };
@@ -195,14 +180,17 @@ const Files: React.FC = () => {
       return <File className="h-5 w-5 text-gray-400" />;
   };
 
+  // Helper para verificar se é imagem
   const isImage = (type: string) => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(type.toLowerCase());
 
+  // Função para baixar enquadrado em A4
   const handleDownload = (file: FileDocument) => {
     if (!file.url || file.url === '#') {
         alert("Arquivo inválido ou não encontrado.");
         return;
     }
 
+    // Se for imagem, gera PDF A4
     if (isImage(file.type)) {
         const doc = new jsPDF({
             orientation: 'portrait',
@@ -214,26 +202,30 @@ const Files: React.FC = () => {
         img.src = file.url;
         
         img.onload = () => {
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 10;
+            const pageWidth = doc.internal.pageSize.getWidth(); // 210mm
+            const pageHeight = doc.internal.pageSize.getHeight(); // 297mm
+            const margin = 10; // 10mm margem
             
             const maxWidth = pageWidth - (margin * 2);
             const maxHeight = pageHeight - (margin * 2);
 
+            // Calcula proporção
             const imgRatio = img.width / img.height;
             const pageRatio = maxWidth / maxHeight;
 
             let finalWidth, finalHeight;
 
             if (imgRatio > pageRatio) {
+                // Limitado pela largura
                 finalWidth = maxWidth;
                 finalHeight = maxWidth / imgRatio;
             } else {
+                // Limitado pela altura
                 finalHeight = maxHeight;
                 finalWidth = maxHeight * imgRatio;
             }
 
+            // Centraliza
             const x = (pageWidth - finalWidth) / 2;
             const y = (pageHeight - finalHeight) / 2;
 
@@ -246,6 +238,7 @@ const Files: React.FC = () => {
             directDownload(file);
         };
     } else {
+        // Se não for imagem, baixa direto
         directDownload(file);
     }
   };
@@ -264,6 +257,7 @@ const Files: React.FC = () => {
       <PageHeader title="Arquivos" buttonLabel="Adicionar Arquivo" onButtonClick={() => openModal()} />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+        {/* Search Bar */}
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
           <div className="relative">
              <input 
@@ -313,6 +307,7 @@ const Files: React.FC = () => {
                     <td className="px-6 py-4 text-gray-500">{file.size}</td>
                     <td className="px-6 py-4 text-gray-500 truncate max-w-xs">{file.description}</td>
                     <td className="px-6 py-4 flex justify-center space-x-2">
+                        {/* Botão de Visualização */}
                         <button 
                             onClick={() => openPreview(file)}
                             className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 flex items-center justify-center" 
@@ -335,10 +330,7 @@ const Files: React.FC = () => {
                             <button 
                                 className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600 transition-colors" 
                                 title="Excluir"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteClick(file);
-                                }}
+                                onClick={() => handleDeleteClick(file)}
                             >
                                 <Trash2 className="h-4 w-4" />
                             </button>
@@ -352,6 +344,7 @@ const Files: React.FC = () => {
         </div>
       </div>
 
+       {/* Modal de Criação / Edição */}
        <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -428,27 +421,14 @@ const Files: React.FC = () => {
                 <input type="text" name="description" value={formData.description} onChange={handleChange} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
             </div>
 
-             <div className="flex justify-between items-center pt-4 border-t mt-4">
-                 <div>
-                    {isEditing && !isClientLevel && formData.id && (
-                        <button 
-                            type="button" 
-                            onClick={() => handleDeleteClick(formData)}
-                            className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 rounded-md transition-colors flex items-center"
-                        >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Excluir
-                        </button>
-                    )}
-                 </div>
-                 <div className="flex">
-                    <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md hover:bg-gray-50">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
-                </div>
+             <div className="flex justify-end pt-4 border-t mt-4">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md hover:bg-gray-50">Cancelar</button>
+                <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
             </div>
         </form>
       </Modal>
 
+      {/* Modal de Seleção de Cliente */}
       <Modal
          isOpen={isClientSelectOpen}
          onClose={() => setIsClientSelectOpen(false)}
@@ -480,6 +460,7 @@ const Files: React.FC = () => {
         </div>
       </Modal>
 
+      {/* Modal de Visualização (Preview) */}
       <Modal
         isOpen={isPreviewModalOpen}
         onClose={() => setIsPreviewModalOpen(false)}
@@ -487,6 +468,7 @@ const Files: React.FC = () => {
       >
          <div className="flex flex-col items-center justify-center p-4">
             
+            {/* Área de Preview - Maior e Proporcional */}
             <div className="mb-6 w-full flex justify-center bg-gray-100 rounded-lg p-2 border border-gray-200 min-h-[200px] items-center relative overflow-hidden">
                 {previewFile && isImage(previewFile.type) ? (
                     <img 
@@ -504,6 +486,7 @@ const Files: React.FC = () => {
                 )}
             </div>
 
+            {/* Detalhes rápidos */}
             {previewFile && (
                 <div className="w-full mb-6 grid grid-cols-2 gap-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-md">
                     <div>
@@ -518,21 +501,19 @@ const Files: React.FC = () => {
                 </div>
             )}
 
+            {/* Ações */}
             <div className="flex space-x-3 w-full">
-                 {previewFile && !isClientLevel && previewFile.id && (
-                    <button
-                        onClick={() => handleDeleteClick(previewFile)}
-                        className="flex-1 flex items-center justify-center bg-white border border-red-200 text-red-600 px-6 py-3 rounded-lg hover:bg-red-50 transition-all font-medium"
-                    >
-                        <Trash2 className="h-5 w-5 mr-2" />
-                        Excluir
-                    </button>
-                )}
+                <button
+                    onClick={() => setIsPreviewModalOpen(false)}
+                    className="flex-1 px-4 py-3 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                    Fechar
+                </button>
                 
                 {previewFile && (
                     <button
                         onClick={() => handleDownload(previewFile)}
-                        className={`flex items-center justify-center bg-brand-blue text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition-all shadow-md font-medium ${!isClientLevel ? 'flex-[2]' : 'w-full'}`}
+                        className="flex-[2] flex items-center justify-center bg-brand-blue text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition-all shadow-md font-medium"
                     >
                         <Download className="h-5 w-5 mr-2" />
                         Baixar Documento {isImage(previewFile.type) && '(A4)'}
@@ -542,7 +523,7 @@ const Files: React.FC = () => {
          </div>
       </Modal>
 
-      {/* NOVO: Modal de Confirmação de Exclusão */}
+      {/* NOVO: Modal de Confirmação de Exclusão Visual */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}

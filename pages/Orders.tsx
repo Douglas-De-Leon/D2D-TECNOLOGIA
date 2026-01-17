@@ -1,9 +1,10 @@
+
 import React, { useEffect, useState } from 'react';
-import { Edit2, Trash2, Search, Eye, UserPlus, FileText, Package, Plus, X, Wrench, AlertTriangle, Printer, Paperclip, UploadCloud } from 'lucide-react';
+import { Edit2, Trash2, Search, Eye, UserPlus, FileText, Package, Plus, X, Wrench, AlertTriangle, Printer, Paperclip, UploadCloud, Calendar, User, CheckCircle, ShieldCheck, Download } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem, getSettings } from '../services/db';
-import { Order, Client, Service, Product, OrderItem, SystemUser, FileDocument } from '../types';
+import { Order, Client, Service, Product, OrderItem, SystemUser, FileDocument, CompanySettings } from '../types';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -11,11 +12,13 @@ const Orders: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
+  const [settings, setSettings] = useState<CompanySettings | null>(null);
   
   // Listas auxiliares para seleção
   const [clientsList, setClientsList] = useState<Client[]>([]);
   const [servicesList, setServicesList] = useState<Service[]>([]);
   const [productsList, setProductsList] = useState<Product[]>([]);
+  const [techList, setTechList] = useState<SystemUser[]>([]); // Lista de técnicos/gerentes
   
   // Controle dos Modais de Seleção
   const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
@@ -29,6 +32,15 @@ const Orders: React.FC = () => {
   // Estados para Exclusão
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+
+  // Estados para Visualização
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [orderToView, setOrderToView] = useState<Order | null>(null);
+  const [attachedFile, setAttachedFile] = useState<FileDocument | null>(null);
+
+  // Estados para Termos de Aceite
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Estado para Anexo
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -55,6 +67,7 @@ const Orders: React.FC = () => {
       }
       loadData();
       loadAuxData();
+      getSettings().then(setSettings);
   }, []);
 
   const isClientLevel = currentUser?.level === 'client';
@@ -85,7 +98,7 @@ const Orders: React.FC = () => {
         if (user.level === 'client') {
              filteredData = filteredData.filter(o => o.client.toLowerCase() === user.name.toLowerCase());
         } else if (user.level === 'technician') {
-             // Técnico vê apenas OS onde ele é responsável
+             // Manter filtro por responsavel para tecnico:
              filteredData = filteredData.filter(o => o.responsible === user.name);
         }
     }
@@ -97,9 +110,15 @@ const Orders: React.FC = () => {
       const clients = await getAll<Client>('clients');
       const services = await getAll<Service>('services');
       const products = await getAll<Product>('products');
+      const users = await getAll<SystemUser>('users');
+      
       setClientsList(clients);
       setServicesList(services);
       setProductsList(products);
+
+      // Filtra usuários que podem ser responsáveis (Admin, Manager, Technician)
+      const techs = users.filter(u => ['admin', 'manager', 'technician'].includes(u.level));
+      setTechList(techs);
   }
 
   // --- Cálculo Automático do Total ---
@@ -119,6 +138,8 @@ const Orders: React.FC = () => {
   const openModal = (order?: Order) => {
     setActiveTab('details');
     setSelectedFile(null); // Reset file
+    setTermsAccepted(false); // Reset terms
+    
     if (order) {
       setFormData({
         ...order,
@@ -129,7 +150,7 @@ const Orders: React.FC = () => {
     } else {
       setFormData({
         client: isClientLevel && currentUser ? currentUser.name : '', // Auto-fill se for cliente
-        responsible: isTechnicianLevel && currentUser ? currentUser.name : '', // Auto-fill se for técnico
+        responsible: (isTechnicianLevel && currentUser) ? currentUser.name : '', // Auto-fill se for técnico criando
         dateInit: new Date().toLocaleDateString('pt-BR'),
         status: 'Aberto',
         statusColor: 'bg-green-500',
@@ -142,6 +163,18 @@ const Orders: React.FC = () => {
       setIsEditing(false);
     }
     setIsModalOpen(true);
+  };
+
+  // --- Visualizar OS ---
+  const handleViewClick = async (order: Order) => {
+    setOrderToView(order);
+    
+    // Buscar anexo vinculado (Simulação baseada na descrição)
+    const allFiles = await getAll<FileDocument>('files');
+    const relatedFile = allFiles.find(f => f.description.startsWith(`Anexo da OS #${order.id}`));
+    setAttachedFile(relatedFile || null);
+
+    setIsViewModalOpen(true);
   };
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -187,8 +220,16 @@ const Orders: React.FC = () => {
       console.log('Arquivo anexado com sucesso');
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Intercepta o Submit para mostrar os Termos
+  const handleFormSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      // Se já estiver editando uma OS existente que não muda de status crítico, talvez não precise de termo sempre.
+      // Mas o pedido foi "antes de finalizar". Vamos mostrar sempre que salvar para garantir.
+      setIsTermsModalOpen(true);
+  };
+
+  // Salva de fato após aceitar os termos
+  const confirmSave = async () => {
     try {
       const servicesCount = formData.services_list?.length || 0;
       const productsCount = formData.products_list?.length || 0;
@@ -210,11 +251,12 @@ const Orders: React.FC = () => {
         savedId = await addItem('orders', dataToSave);
       }
 
-      // Se houver arquivo para salvar e for uma criação (ou edição onde o user quis anexar algo novo)
+      // Se houver arquivo para salvar
       if (selectedFile) {
           await saveFileAttachment(savedId);
       }
 
+      setIsTermsModalOpen(false);
       setIsModalOpen(false);
       loadData();
     } catch (error) {
@@ -241,12 +283,13 @@ const Orders: React.FC = () => {
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   // --- Geração de PDF ---
   const handlePrint = async (order: Order) => {
+     // ... (mesmo código de impressão) ...
     try {
         const settings = await getSettings();
         const doc = new jsPDF();
@@ -416,6 +459,16 @@ const Orders: React.FC = () => {
       setSearchTerm('');
   };
 
+  const updateProductQuantity = (id: string, newQty: number) => {
+      if (newQty < 1) return;
+      setFormData(prev => ({
+          ...prev,
+          products_list: prev.products_list?.map(item =>
+              item.id === id ? { ...item, quantity: newQty } : item
+          )
+      }));
+  };
+
   const removeItem = (id: string, type: 'service' | 'product') => {
       if (type === 'service') {
           setFormData(prev => ({
@@ -443,6 +496,7 @@ const Orders: React.FC = () => {
       />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+        {/* ... (Search and Table Header) ... */}
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex gap-2">
              <button className="px-3 py-1.5 text-xs font-medium bg-gray-100 text-gray-600 rounded hover:bg-gray-200">Todas</button>
@@ -486,7 +540,14 @@ const Orders: React.FC = () => {
                     <td className="px-6 py-4 flex justify-center space-x-1">
                         <button 
                             className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" 
-                            title="Visualizar / Imprimir PDF"
+                            title="Visualizar Detalhes"
+                            onClick={() => handleViewClick(os)}
+                        >
+                            <Eye className="h-4 w-4" />
+                        </button>
+                        <button 
+                            className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" 
+                            title="Imprimir PDF"
                             onClick={() => handlePrint(os)}
                         >
                             <Printer className="h-4 w-4" />
@@ -518,12 +579,151 @@ const Orders: React.FC = () => {
         </div>
       </div>
 
+      {/* Modal de Detalhes da OS (View Only) */}
+      <Modal
+         isOpen={isViewModalOpen}
+         onClose={() => setIsViewModalOpen(false)}
+         title={`Detalhes da OS #${orderToView?.id || ''}`}
+      >
+        {/* ... (conteúdo do modal view) ... */}
+        {orderToView && (
+            <div className="space-y-6">
+                <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+                    <div>
+                         <span className={`px-3 py-1 rounded-full text-xs font-bold text-white uppercase ${orderToView.statusColor}`}>
+                            {orderToView.status}
+                         </span>
+                         <p className="text-xs text-gray-400 mt-2">Data Inicial: <span className="text-gray-600">{orderToView.dateInit}</span></p>
+                    </div>
+                    <div className="text-right">
+                         <p className="text-sm font-bold text-gray-800">Total</p>
+                         <p className="text-2xl font-bold text-brand-blue">{orderToView.total}</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                    <div>
+                        <p className="text-xs text-gray-400 uppercase font-bold flex items-center mb-1"><User className="h-3 w-3 mr-1"/> Cliente</p>
+                        <p className="text-sm font-medium text-gray-800">{orderToView.client}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-400 uppercase font-bold flex items-center mb-1"><UserPlus className="h-3 w-3 mr-1"/> Responsável</p>
+                        <p className="text-sm font-medium text-gray-800">{orderToView.responsible || 'Não definido'}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <p className="text-xs text-gray-400 uppercase font-bold mb-1">Descrição / Defeito</p>
+                    <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 min-h-[60px] border border-gray-200">
+                        {orderToView.description || 'Sem descrição.'}
+                    </div>
+                </div>
+
+                {attachedFile && (
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-md flex items-center justify-between">
+                        <div className="flex items-center overflow-hidden">
+                            <div className="bg-white p-2 rounded-full shadow-sm mr-3">
+                                <FileText className="h-5 w-5 text-brand-blue" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">{attachedFile.name}</p>
+                                <p className="text-xs text-gray-500">{attachedFile.size} • {attachedFile.date}</p>
+                            </div>
+                        </div>
+                        <a 
+                            href={attachedFile.url} 
+                            download={attachedFile.name}
+                            className="ml-4 p-2 bg-white text-brand-blue rounded-full shadow-sm hover:bg-blue-100 transition-colors"
+                            title="Baixar Anexo"
+                        >
+                            <Download className="h-4 w-4" />
+                        </a>
+                    </div>
+                )}
+
+                {(orderToView.services_list && orderToView.services_list.length > 0) && (
+                    <div>
+                         <p className="text-xs text-gray-400 uppercase font-bold mb-1 flex items-center"><Wrench className="h-3 w-3 mr-1"/> Serviços</p>
+                         <div className="border rounded-md overflow-hidden text-sm">
+                             <table className="w-full">
+                                 <thead className="bg-gray-100 text-xs text-gray-500 uppercase">
+                                     <tr>
+                                         <th className="px-3 py-2 text-left">Serviço</th>
+                                         <th className="px-3 py-2 text-right">Valor</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-gray-100">
+                                     {orderToView.services_list.map((s, idx) => (
+                                         <tr key={idx}>
+                                             <td className="px-3 py-2">{s.name}</td>
+                                             <td className="px-3 py-2 text-right">{numberToCurrency(s.price * s.quantity)}</td>
+                                         </tr>
+                                     ))}
+                                 </tbody>
+                             </table>
+                         </div>
+                    </div>
+                )}
+
+                {(orderToView.products_list && orderToView.products_list.length > 0) && (
+                    <div>
+                         <p className="text-xs text-gray-400 uppercase font-bold mb-1 flex items-center"><Package className="h-3 w-3 mr-1"/> Produtos</p>
+                         <div className="border rounded-md overflow-hidden text-sm">
+                             <table className="w-full">
+                                 <thead className="bg-gray-100 text-xs text-gray-500 uppercase">
+                                     <tr>
+                                         <th className="px-3 py-2 text-left">Produto</th>
+                                         <th className="px-3 py-2 text-center">Qtd</th>
+                                         <th className="px-3 py-2 text-right">Valor</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-gray-100">
+                                     {orderToView.products_list.map((p, idx) => (
+                                         <tr key={idx}>
+                                             <td className="px-3 py-2">{p.name}</td>
+                                             <td className="px-3 py-2 text-center">{p.quantity}</td>
+                                             <td className="px-3 py-2 text-right">{numberToCurrency(p.price * p.quantity)}</td>
+                                         </tr>
+                                     ))}
+                                 </tbody>
+                             </table>
+                         </div>
+                    </div>
+                )}
+
+                {/* Exibição do Termo de Garantia no View Modal */}
+                <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center">
+                         <ShieldCheck className="h-3 w-3 mr-1" /> Termo de Garantia
+                     </h4>
+                     <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed text-justify">
+                        {settings?.warrantyText || "Termo padrão não configurado."}
+                     </p>
+                     <div className="mt-2 flex items-center text-xs text-green-600 font-medium">
+                         <CheckCircle className="h-3 w-3 mr-1" />
+                         Aceite registrado no ato da finalização.
+                     </div>
+                </div>
+
+                <div className="flex justify-end pt-4 border-t">
+                    <button 
+                        onClick={() => setIsViewModalOpen(false)}
+                        className="px-4 py-2 bg-white border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        )}
+      </Modal>
+
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={isEditing ? "Editar OS" : "Nova Ordem de Serviço"}
       >
-        <form onSubmit={handleSave} className="space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+            {/* ... (conteúdo do form) ... */}
             <div className="flex border-b border-gray-200 mb-4">
                 <button
                     type="button"
@@ -556,7 +756,7 @@ const Orders: React.FC = () => {
                             type="text" 
                             name="client" 
                             required 
-                            readOnly={isClientLevel} // Clientes não podem mudar o cliente
+                            readOnly={isClientLevel} 
                             value={formData.client} 
                             placeholder="Selecione um cliente"
                             className="block w-full border border-gray-300 rounded-l-md p-2 bg-gray-50 cursor-pointer"
@@ -589,14 +789,27 @@ const Orders: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Responsável</label>
-                        <input 
-                            type="text" 
-                            name="responsible" 
-                            value={formData.responsible} 
-                            onChange={handleChange} 
-                            readOnly={isClientLevel || isTechnicianLevel} 
-                            className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${(isClientLevel || isTechnicianLevel) ? 'bg-gray-100' : ''}`}
-                        />
+                        {isClientLevel ? (
+                            <input 
+                                type="text" 
+                                name="responsible" 
+                                value={formData.responsible} 
+                                readOnly 
+                                className="mt-1 block w-full border border-gray-300 rounded-md p-2 bg-gray-100"
+                            />
+                        ) : (
+                            <select 
+                                name="responsible"
+                                value={formData.responsible}
+                                onChange={handleChange as any}
+                                className="mt-1 block w-full border border-gray-300 rounded-md p-2"
+                            >
+                                <option value="">Selecione um responsável</option>
+                                {techList.map(u => (
+                                    <option key={u.id} value={u.name}>{u.name}</option>
+                                ))}
+                            </select>
+                        )}
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Data Inicial</label>
@@ -630,7 +843,6 @@ const Orders: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Seção de Anexo para Clientes ou Novos Pedidos */}
                 <div className="mt-4 border-t pt-4">
                      <label className="block text-sm font-medium text-gray-700 mb-2">Anexo / Arquivo (Opcional)</label>
                      <div className="flex items-center space-x-2">
@@ -650,7 +862,6 @@ const Orders: React.FC = () => {
             </div>
 
             <div className={activeTab === 'services' ? 'block' : 'hidden'}>
-                {/* Permite cliente adicionar também */}
                 <div className="flex justify-end mb-2">
                     <button 
                         type="button" 
@@ -682,7 +893,6 @@ const Orders: React.FC = () => {
                                         <td className="px-4 py-2">{item.name}</td>
                                         <td className="px-4 py-2 text-right">{numberToCurrency(item.price)}</td>
                                         <td className="px-4 py-2 text-center">
-                                            {/* Permite remover se não for cliente ou se o status for Aberto */}
                                             {(!isClientLevel || formData.status === 'Aberto') && (
                                                 <button 
                                                     type="button" 
@@ -702,7 +912,6 @@ const Orders: React.FC = () => {
             </div>
 
             <div className={activeTab === 'products' ? 'block' : 'hidden'}>
-                 {/* Permite cliente adicionar também */}
                 <div className="flex justify-end mb-2">
                     <button 
                         type="button" 
@@ -734,7 +943,19 @@ const Orders: React.FC = () => {
                                 {formData.products_list.map((item) => (
                                     <tr key={item.id} className="bg-white">
                                         <td className="px-4 py-2">{item.name}</td>
-                                        <td className="px-4 py-2 text-center">{item.quantity}</td>
+                                        <td className="px-4 py-2 text-center">
+                                            {(!isClientLevel || formData.status === 'Aberto') ? (
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    value={item.quantity}
+                                                    onChange={(e) => updateProductQuantity(item.id, parseInt(e.target.value) || 1)}
+                                                    className="w-16 text-center border border-gray-300 rounded-md p-1 text-sm focus:ring-1 focus:ring-brand-blue outline-none"
+                                                />
+                                            ) : (
+                                                <span className="text-gray-700">{item.quantity}</span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-2 text-right">{numberToCurrency(item.price)}</td>
                                         <td className="px-4 py-2 text-right font-medium">{numberToCurrency(item.price * item.quantity)}</td>
                                         <td className="px-4 py-2 text-center">
@@ -763,6 +984,58 @@ const Orders: React.FC = () => {
         </form>
       </Modal>
 
+      {/* NOVO: Modal de Termos de Aceite */}
+      <Modal
+        isOpen={isTermsModalOpen}
+        onClose={() => setIsTermsModalOpen(false)}
+        title="Termo de Garantia e Aceite"
+      >
+        <div className="flex flex-col h-full">
+            <div className="flex items-center mb-4 p-3 bg-blue-50 text-brand-blue rounded-md">
+                <ShieldCheck className="h-6 w-6 mr-3" />
+                <span className="text-sm font-semibold">É necessário aceitar os termos antes de finalizar.</span>
+            </div>
+            
+            <div className="flex-1 bg-white border border-gray-200 rounded-md p-4 mb-4 overflow-y-auto max-h-60">
+                <h4 className="font-bold text-gray-800 mb-2 border-b pb-1">Termos de Garantia</h4>
+                <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed text-justify">
+                    {settings?.warrantyText || "Termo padrão de garantia não configurado."}
+                </p>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                <label className="flex items-center cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={termsAccepted}
+                        onChange={(e) => setTermsAccepted(e.target.checked)}
+                        className="h-5 w-5 text-brand-blue focus:ring-brand-blue border-gray-300 rounded"
+                    />
+                    <span className="ml-3 text-sm font-medium text-gray-900 select-none">
+                        Li e concordo com os Termos de Garantia
+                    </span>
+                </label>
+            </div>
+
+            <div className="flex justify-end mt-4 pt-2 border-t">
+                 <button
+                    onClick={() => setIsTermsModalOpen(false)}
+                    className="mr-3 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                    Cancelar
+                </button>
+                <button
+                    onClick={confirmSave}
+                    disabled={!termsAccepted}
+                    className={`px-4 py-2 text-sm font-medium text-white rounded-md shadow-sm transition-colors ${termsAccepted ? 'bg-brand-blue hover:bg-blue-600' : 'bg-gray-400 cursor-not-allowed'}`}
+                >
+                    Confirmar e Salvar
+                </button>
+            </div>
+        </div>
+      </Modal>
+
+      {/* Modais de Seleção (Cliente, Serviço, Produto, Exclusão) */}
       <Modal
          isOpen={isClientSelectOpen}
          onClose={() => setIsClientSelectOpen(false)}

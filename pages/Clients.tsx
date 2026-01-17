@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { Edit2, Trash2, Search, MapPin, User, Building, AlertTriangle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
@@ -70,21 +71,19 @@ const Clients: React.FC = () => {
       } else {
         await addItem('clients', formData);
         
-        // --- AUTO-CRIAÇÃO DE USUÁRIO ---
-        if (formData.email && formData.cpf && formData.type === 'Cliente') {
-            // Verifica se usuário já existe
+        // --- AUTO-CRIAÇÃO DE ACESSO ---
+        if (formData.email && formData.cpf) {
             const { data: existingUser } = await supabase.from('users').select('id').eq('email', formData.email).maybeSingle();
             
             if (!existingUser) {
-                // Cria usuário com acesso nível 'client'
                 await supabase.from('users').insert({
                     name: formData.name,
                     email: formData.email,
-                    password: formData.cpf, // Senha padrão = CPF
-                    level: 'client',
+                    password: formData.cpf,
+                    level: formData.type === 'Fornecedor' ? 'technician' : 'client',
                     avatar_url: ''
                 });
-                console.log("Usuário de acesso criado automaticamente para o cliente.");
+                console.log("Usuário de acesso criado automaticamente.");
             }
         }
       }
@@ -96,13 +95,11 @@ const Clients: React.FC = () => {
     }
   };
 
-  // Abre o modal de confirmação
   const handleDeleteClick = (client: Client) => {
     setClientToDelete(client);
     setIsDeleteModalOpen(true);
   };
 
-  // Executa a exclusão de fato
   const confirmDelete = async () => {
     if (clientToDelete && clientToDelete.id) {
         const success = await deleteItem('clients', clientToDelete.id);
@@ -111,7 +108,7 @@ const Clients: React.FC = () => {
             setIsDeleteModalOpen(false);
             setClientToDelete(null);
         } else {
-            alert("Erro ao excluir. Verifique se o usuário tem permissão ou consulte o console.");
+            alert("Erro ao excluir. Verifique se o usuário tem permissão.");
         }
     }
   };
@@ -122,14 +119,14 @@ const Clients: React.FC = () => {
 
   return (
     <div>
-      <PageHeader title="Clientes / Fornecedores" buttonLabel="Adicionar" onButtonClick={() => openModal()} />
+      <PageHeader title="Gerenciar Clientes" buttonLabel="Adicionar Cliente" onButtonClick={() => openModal()} />
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
           <div className="relative">
              <input 
                 type="text" 
-                placeholder="Pesquisar..." 
+                placeholder="Pesquisar clientes..." 
                 className="pl-8 pr-4 py-2 border rounded-md text-sm focus:ring-1 focus:ring-brand-blue focus:border-brand-blue outline-none w-64"
              />
              <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-2.5" />
@@ -141,7 +138,7 @@ const Clients: React.FC = () => {
             <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b">
               <tr>
                 <th className="px-6 py-3 font-medium">#</th>
-                <th className="px-6 py-3 font-medium">Nome</th>
+                <th className="px-6 py-3 font-medium">Cliente</th>
                 <th className="px-6 py-3 font-medium">CPF/CNPJ</th>
                 <th className="px-6 py-3 font-medium">Contato</th>
                 <th className="px-6 py-3 font-medium">Tipo</th>
@@ -150,7 +147,7 @@ const Clients: React.FC = () => {
             </thead>
             <tbody>
               {clients.length === 0 ? (
-                 <tr><td colSpan={6} className="px-6 py-4 text-center text-gray-500">Nenhum cadastro encontrado.</td></tr>
+                 <tr><td colSpan={6} className="px-6 py-4 text-center text-gray-500">Nenhum cliente encontrado.</td></tr>
               ) : (
                 clients.map((client) => (
                     <tr key={client.id} className="bg-white border-b hover:bg-gray-50">
@@ -200,11 +197,10 @@ const Clients: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal de Cadastro / Edição */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={isEditing ? "Editar Cadastro" : "Novo Cadastro"}
+        title={isEditing ? "Editar Cliente" : "Novo Cliente"}
       >
         <form id="client-form" onSubmit={handleSave} className="space-y-4">
           
@@ -377,7 +373,7 @@ const Clients: React.FC = () => {
                 <AlertTriangle className="h-6 w-6 text-red-600" />
             </div>
             <div>
-                <h4 className="text-lg font-medium text-gray-900">Excluir Cadastro?</h4>
+                <h4 className="text-lg font-medium text-gray-900">Excluir Cliente?</h4>
                 <p className="text-sm text-gray-500 mt-2">
                     Você tem certeza que deseja excluir <strong>{clientToDelete?.name}</strong>? 
                     <br/>Esta ação não poderá ser desfeita.

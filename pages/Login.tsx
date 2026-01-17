@@ -1,18 +1,24 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Lock, Mail, ChevronRight, AlertCircle } from 'lucide-react';
 import { login } from '../services/auth';
-import { SystemUser } from '../types';
+import { SystemUser, CompanySettings } from '../types';
+import { getSettings } from '../services/db';
 
 interface LoginProps {
   onLoginSuccess: (user: SystemUser) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-  // Pre-filling credentials as requested
   const [email, setEmail] = useState('dougdeleon@gmail.com');
   const [password, setPassword] = useState('29092019Ic#');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [settings, setSettings] = useState<CompanySettings | null>(null);
+
+  useEffect(() => {
+    getSettings().then(setSettings);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,14 +36,19 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
       <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-brand-blue rounded-lg flex items-center justify-center transform rotate-3 mb-4 shadow-lg">
-                <div className="w-8 h-8 border-4 border-white rounded-full"></div>
+            <div className="flex flex-col items-center mb-2">
+                <div className="w-12 h-12 bg-brand-blue rounded-lg flex items-center justify-center transform rotate-45 shadow-lg mb-4">
+                    <div className="w-6 h-6 border-2 border-white rounded-full"></div>
+                </div>
+                <div className="flex flex-col leading-tight items-center">
+                    <span className="text-3xl font-black text-gray-800 tracking-tighter">DDOS</span>
+                    <span className="text-xs font-bold text-brand-blue tracking-[0.4em] -mt-1 ml-1">TECNOLOGIA</span>
+                </div>
             </div>
-            <h2 className="text-2xl font-bold text-gray-800">Map-OS</h2>
-            <p className="text-gray-500 text-sm">Faça login para continuar</p>
+            <p className="text-gray-500 text-sm mt-2">Faça login para continuar</p>
         </div>
 
         {error && (

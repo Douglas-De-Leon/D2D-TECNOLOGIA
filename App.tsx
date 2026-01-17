@@ -18,13 +18,25 @@ import Setup from './pages/Setup';
 import { initDB } from './services/db';
 import { SystemUser } from './types';
 
+interface PermissionGateProps {
+    children: React.ReactNode;
+    moduleId: string;
+    user: SystemUser;
+}
+
+const PermissionGate: React.FC<PermissionGateProps> = ({ children, moduleId, user }) => {
+    if (user.level === 'admin') return <>{children}</>;
+    const perm = user.permissions?.find(p => p.module === moduleId);
+    if (perm && perm.view) return <>{children}</>;
+    return <Navigate to="/" replace />;
+};
+
 const App: React.FC = () => {
   const [isDbReady, setIsDbReady] = useState(false);
   const [dbError, setDbError] = useState<any>(null);
   const [user, setUser] = useState<SystemUser | null>(null);
 
   useEffect(() => {
-    // Check local storage for session (basic persistence)
     const storedUser = localStorage.getItem('mapos_user');
     if (storedUser) {
         try {
@@ -36,13 +48,10 @@ const App: React.FC = () => {
 
     initDB()
       .then((result) => {
-        if (!result.success) {
-            setDbError(result.error);
-        }
+        if (!result.success) setDbError(result.error);
         setIsDbReady(true);
       })
       .catch((err) => {
-        console.error('Database initialization failed:', err);
         setDbError(err);
         setIsDbReady(true);
       });
@@ -58,52 +67,35 @@ const App: React.FC = () => {
       localStorage.removeItem('mapos_user');
   };
 
-  if (!isDbReady) {
-    return (
+  if (!isDbReady) return (
       <div className="flex items-center justify-center h-screen bg-gray-100">
         <div className="flex flex-col items-center">
             <div className="w-8 h-8 border-4 border-brand-blue border-t-transparent rounded-full animate-spin mb-2"></div>
-            <span className="text-gray-500 font-medium">Carregando sistema...</span>
+            <span className="text-gray-500 font-medium text-sm">Carregando sistema...</span>
         </div>
       </div>
-    );
-  }
+  );
 
-  // Se houver erro de conexão (ex: tabelas não existem), mostre a tela de Setup
-  if (dbError) {
-      return <Setup error={dbError} />;
-  }
-
-  // Se não estiver logado, mostra Login
-  if (!user) {
-      return <Login onLoginSuccess={handleLogin} />;
-  }
-
-  const isClient = user.level === 'client';
+  if (dbError) return <Setup error={dbError} />;
+  if (!user) return <Login onLoginSuccess={handleLogin} />;
 
   return (
     <HashRouter>
       <Routes>
         <Route path="/" element={<Layout onLogout={handleLogout} user={user} />}>
-          {/* Se for Cliente, a raiz redireciona para Ordens, caso contrário, Dashboard */}
-          <Route index element={isClient ? <Navigate to="/orders" replace /> : <Dashboard />} />
+          <Route index element={<Dashboard />} />
           
-          <Route path="clients" element={<Clients />} />
-          <Route path="products" element={<Products />} />
-          <Route path="services" element={<Services />} />
-          <Route path="orders" element={<Orders />} />
-          <Route path="sales" element={<Sales />} />
-          <Route path="finance" element={<Finance />} />
-          <Route path="files" element={<Files />} />
-          
-          {/* Proteção de Rota: Cliente não acessa Configurações */}
-          <Route path="settings" element={isClient ? <Navigate to="/orders" replace /> : <Settings />} />
-          
-          <Route path="warranties" element={<Warranties />} />
+          <Route path="usuarios" element={<PermissionGate moduleId="usuarios" user={user}><Clients /></PermissionGate>} />
+          <Route path="products" element={<PermissionGate moduleId="dashboard" user={user}><Products /></PermissionGate>} />
+          <Route path="services" element={<PermissionGate moduleId="dashboard" user={user}><Services /></PermissionGate>} />
+          <Route path="orders" element={<PermissionGate moduleId="orders" user={user}><Orders /></PermissionGate>} />
+          <Route path="sales" element={<PermissionGate moduleId="sales" user={user}><Sales /></PermissionGate>} />
+          <Route path="finance" element={<PermissionGate moduleId="finance" user={user}><Finance /></PermissionGate>} />
+          <Route path="files" element={<PermissionGate moduleId="files" user={user}><Files /></PermissionGate>} />
+          <Route path="settings" element={<PermissionGate moduleId="settings" user={user}><Settings /></PermissionGate>} />
+          <Route path="warranties" element={<PermissionGate moduleId="warranties" user={user}><Warranties /></PermissionGate>} />
+          <Route path="reports" element={<PermissionGate moduleId="reports" user={user}><GenericPage title="Relatórios" /></PermissionGate>} />
           <Route path="profile" element={<Profile />} />
-          
-          {/* Generic/Placeholder Routes */}
-          <Route path="reports" element={<GenericPage title="Relatórios" />} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

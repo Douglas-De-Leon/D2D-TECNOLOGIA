@@ -1,17 +1,20 @@
+
 import React, { useEffect, useState } from 'react';
-import { Edit2, Trash2, Search, ShoppingCart, Eye, AlertTriangle, Plus, X, Package, UserPlus } from 'lucide-react';
+import { Edit2, Trash2, Search, ShoppingCart, Eye, AlertTriangle, Plus, X, Package, UserPlus, ShieldCheck, Calendar, User } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
-import { getAll, addItem, deleteItem, updateItem } from '../services/db';
-import { Sale, Client, Product, OrderItem, SystemUser } from '../types';
+import { getAll, addItem, deleteItem, updateItem, getSettings } from '../services/db';
+import { Sale, Client, Product, OrderItem, SystemUser, CompanySettings } from '../types';
 
 const Sales: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
   const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
+  const [settings, setSettings] = useState<CompanySettings | null>(null);
   
   // Listas Auxiliares
   const [clientsList, setClientsList] = useState<Client[]>([]);
   const [productsList, setProductsList] = useState<Product[]>([]);
+  const [techList, setTechList] = useState<SystemUser[]>([]);
 
   // Modais de Seleção
   const [isClientSelectOpen, setIsClientSelectOpen] = useState(false);
@@ -30,9 +33,17 @@ const Sales: React.FC = () => {
   });
   const [isEditing, setIsEditing] = useState(false);
 
+  // Estados para Visualização
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [saleToView, setSaleToView] = useState<Sale | null>(null);
+
   // Estados para Exclusão
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null);
+
+  // Estados para Termos de Aceite
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Use 'service_sales' instead of 'sales' to avoid ad-blockers
   const TABLE_NAME = 'service_sales';
@@ -44,6 +55,7 @@ const Sales: React.FC = () => {
     }
     loadData();
     loadAuxData();
+    getSettings().then(setSettings);
   }, []);
 
   const isClientLevel = currentUser?.level === 'client';
@@ -72,8 +84,14 @@ const Sales: React.FC = () => {
   const loadAuxData = async () => {
       const clients = await getAll<Client>('clients');
       const products = await getAll<Product>('products');
+      const users = await getAll<SystemUser>('users');
+      
       setClientsList(clients);
       setProductsList(products);
+
+      // Filtra usuários que podem ser responsáveis (Admin, Manager, Technician)
+      const techs = users.filter(u => ['admin', 'manager', 'technician'].includes(u.level));
+      setTechList(techs);
   };
 
   // --- Helpers de Moeda ---
@@ -99,6 +117,7 @@ const Sales: React.FC = () => {
   }, [formData.products_list, isModalOpen]);
 
   const openModal = (sale?: Sale) => {
+    setTermsAccepted(false); // Reset terms
     if (sale) {
       setFormData({
           ...sale,
@@ -109,7 +128,7 @@ const Sales: React.FC = () => {
     } else {
       setFormData({
         client: isClientLevel && currentUser ? currentUser.name : '',
-        responsible: isTechnicianLevel && currentUser ? currentUser.name : '',
+        responsible: (isTechnicianLevel && currentUser) ? currentUser.name : '',
         date: new Date().toLocaleDateString('pt-BR'),
         total: 'R$ 0,00',
         status: 'Aberto',
@@ -121,8 +140,20 @@ const Sales: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Visualizar Venda
+  const handleViewClick = (sale: Sale) => {
+      setSaleToView(sale);
+      setIsViewModalOpen(true);
+  };
+
+  // Intercepta o Submit para mostrar os Termos
+  const handleFormSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      setIsTermsModalOpen(true);
+  };
+
+  // Salva de fato após aceitar os termos
+  const confirmSave = async () => {
     try {
       if (isEditing && formData.id) {
         await updateItem(TABLE_NAME, formData);
@@ -132,6 +163,7 @@ const Sales: React.FC = () => {
             throw new Error("Falha ao criar venda. Verifique a conexão.");
         }
       }
+      setIsTermsModalOpen(false);
       setIsModalOpen(false);
       loadData();
     } catch (error) {
@@ -287,16 +319,14 @@ const Sales: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 font-bold text-gray-700">{sale.total}</td>
                     <td className="px-6 py-4 flex justify-center space-x-2">
-                         {/* Cliente vê ícone de Olho se estiver fechado, ou Editar se estiver Aberto */}
-                         {(isClientLevel && sale.status !== 'Aberto') && (
-                             <button 
-                                className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" 
-                                title="Ver Detalhes"
-                                onClick={() => openModal(sale)}
-                             >
-                                 <Eye className="h-4 w-4" />
-                             </button>
-                         )}
+                         {/* Botão Visualizar - Disponível para todos */}
+                         <button 
+                            className="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200" 
+                            title="Visualizar Detalhes"
+                            onClick={() => handleViewClick(sale)}
+                         >
+                             <Eye className="h-4 w-4" />
+                         </button>
 
                          {/* Botões de Ação para Admin/Técnico ou Cliente se status Aberto */}
                          {(!isClientLevel || (isClientLevel && sale.status === 'Aberto')) && (
@@ -328,13 +358,108 @@ const Sales: React.FC = () => {
         </div>
       </div>
 
+      {/* Modal de Visualização (View Only) */}
+      <Modal
+         isOpen={isViewModalOpen}
+         onClose={() => setIsViewModalOpen(false)}
+         title={`Detalhes da Venda #${saleToView?.id || ''}`}
+      >
+        {saleToView && (
+            <div className="space-y-6">
+                <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+                    <div>
+                         <span className={`px-3 py-1 rounded-full text-xs font-bold text-white uppercase ${getStatusColor(saleToView.status)}`}>
+                            {saleToView.status}
+                         </span>
+                         <div className="flex items-center text-xs text-gray-400 mt-2">
+                             <Calendar className="h-3 w-3 mr-1"/>
+                             <span>Data: {saleToView.date}</span>
+                         </div>
+                    </div>
+                    <div className="text-right">
+                         <p className="text-sm font-bold text-gray-800">Total</p>
+                         <p className="text-2xl font-bold text-brand-blue">{saleToView.total}</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                    <div>
+                        <p className="text-xs text-gray-400 uppercase font-bold flex items-center mb-1"><User className="h-3 w-3 mr-1"/> Cliente</p>
+                        <p className="text-sm font-medium text-gray-800">{saleToView.client}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-400 uppercase font-bold flex items-center mb-1"><UserPlus className="h-3 w-3 mr-1"/> Responsável</p>
+                        <p className="text-sm font-medium text-gray-800">{saleToView.responsible || 'Não definido'}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <p className="text-xs text-gray-400 uppercase font-bold mb-1">Observações / Detalhes</p>
+                    <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 min-h-[40px] border border-gray-200">
+                        {saleToView.details || 'Sem observações adicionais.'}
+                    </div>
+                </div>
+
+                {/* Lista de Produtos */}
+                {(saleToView.products_list && saleToView.products_list.length > 0) && (
+                    <div>
+                         <p className="text-xs text-gray-400 uppercase font-bold mb-1 flex items-center"><Package className="h-3 w-3 mr-1"/> Itens da Venda</p>
+                         <div className="border rounded-md overflow-hidden text-sm">
+                             <table className="w-full">
+                                 <thead className="bg-gray-100 text-xs text-gray-500 uppercase">
+                                     <tr>
+                                         <th className="px-3 py-2 text-left">Produto</th>
+                                         <th className="px-3 py-2 text-center">Qtd</th>
+                                         <th className="px-3 py-2 text-right">Valor</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-gray-100">
+                                     {saleToView.products_list.map((p, idx) => (
+                                         <tr key={idx}>
+                                             <td className="px-3 py-2">{p.name}</td>
+                                             <td className="px-3 py-2 text-center">{p.quantity}</td>
+                                             <td className="px-3 py-2 text-right">{numberToCurrency(p.price * p.quantity)}</td>
+                                         </tr>
+                                     ))}
+                                 </tbody>
+                             </table>
+                         </div>
+                    </div>
+                )}
+
+                {/* Exibição do Termo de Garantia no View Modal */}
+                <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center">
+                         <ShieldCheck className="h-3 w-3 mr-1" /> Termos da Venda / Garantia
+                     </h4>
+                     <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed text-justify">
+                        {settings?.warrantyText || "Termo padrão não configurado."}
+                     </p>
+                     <div className="mt-2 flex items-center text-xs text-green-600 font-medium">
+                         <ShieldCheck className="h-3 w-3 mr-1" />
+                         Aceite registrado.
+                     </div>
+                </div>
+
+                <div className="flex justify-end pt-4 border-t">
+                    <button 
+                        onClick={() => setIsViewModalOpen(false)}
+                        className="px-4 py-2 bg-white border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        )}
+      </Modal>
+
       {/* Modal de Cadastro / Edição */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={isEditing ? modalTitleEdit : modalTitleNew}
       >
-        <form onSubmit={handleSave} className="space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-4">
             {/* Seleção de Cliente */}
             <div>
                 <label className="block text-sm font-medium text-gray-700">Cliente</label>
@@ -364,14 +489,17 @@ const Sales: React.FC = () => {
             {!isClientLevel && (
                 <div>
                     <label className="block text-sm font-medium text-gray-700">Responsável</label>
-                    <input 
-                        type="text" 
+                    <select 
                         name="responsible"
                         value={formData.responsible} 
-                        onChange={handleChange}
-                        readOnly={isTechnicianLevel}
-                        className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${isTechnicianLevel ? 'bg-gray-100' : ''}`}
-                    />
+                        onChange={handleChange as any}
+                        className="mt-1 block w-full border border-gray-300 rounded-md p-2"
+                    >
+                        <option value="">Selecione um responsável</option>
+                        {techList.map(u => (
+                            <option key={u.id} value={u.name}>{u.name}</option>
+                        ))}
+                    </select>
                 </div>
             )}
             
@@ -485,6 +613,57 @@ const Sales: React.FC = () => {
                 )}
             </div>
         </form>
+      </Modal>
+
+      {/* NOVO: Modal de Termos de Aceite */}
+      <Modal
+        isOpen={isTermsModalOpen}
+        onClose={() => setIsTermsModalOpen(false)}
+        title="Termo de Garantia e Aceite"
+      >
+        <div className="flex flex-col h-full">
+            <div className="flex items-center mb-4 p-3 bg-blue-50 text-brand-blue rounded-md">
+                <ShieldCheck className="h-6 w-6 mr-3" />
+                <span className="text-sm font-semibold">É necessário aceitar os termos antes de finalizar.</span>
+            </div>
+            
+            <div className="flex-1 bg-white border border-gray-200 rounded-md p-4 mb-4 overflow-y-auto max-h-60">
+                <h4 className="font-bold text-gray-800 mb-2 border-b pb-1">Termos de Garantia / Venda</h4>
+                <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed text-justify">
+                    {settings?.warrantyText || "Termo padrão de garantia não configurado."}
+                </p>
+            </div>
+
+            <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                <label className="flex items-center cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={termsAccepted}
+                        onChange={(e) => setTermsAccepted(e.target.checked)}
+                        className="h-5 w-5 text-brand-blue focus:ring-brand-blue border-gray-300 rounded"
+                    />
+                    <span className="ml-3 text-sm font-medium text-gray-900 select-none">
+                        Li e concordo com os Termos
+                    </span>
+                </label>
+            </div>
+
+            <div className="flex justify-end mt-4 pt-2 border-t">
+                 <button
+                    onClick={() => setIsTermsModalOpen(false)}
+                    className="mr-3 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                    Cancelar
+                </button>
+                <button
+                    onClick={confirmSave}
+                    disabled={!termsAccepted}
+                    className={`px-4 py-2 text-sm font-medium text-white rounded-md shadow-sm transition-colors ${termsAccepted ? 'bg-brand-blue hover:bg-blue-600' : 'bg-gray-400 cursor-not-allowed'}`}
+                >
+                    Confirmar e Salvar
+                </button>
+            </div>
+        </div>
       </Modal>
 
       <Modal

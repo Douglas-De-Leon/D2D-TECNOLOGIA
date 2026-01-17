@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Edit2, Trash2, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { Edit2, Trash2, TrendingUp, TrendingDown, DollarSign, AlertTriangle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import Modal from '../components/Modal';
 import { getAll, addItem, deleteItem, updateItem } from '../services/db';
@@ -18,6 +18,10 @@ const Finance: React.FC = () => {
       date: '',
       rawValue: 0
   });
+
+  // Estados para Modal de Exclusão
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
 
   const loadData = async () => {
     const data = await getAll<Transaction>('transactions');
@@ -95,11 +99,30 @@ const Finance: React.FC = () => {
     }
   };
 
+  // --- Lógica de Exclusão ---
+  const handleDeleteClick = (transaction: Transaction) => {
+    setTransactionToDelete(transaction);
+    setIsDeleteModalOpen(true);
+  };
 
-  const handleDelete = async (id: number) => {
-    if (window.confirm('Excluir este lançamento?')) {
-        await deleteItem('transactions', id);
-        loadData();
+  const confirmDelete = async () => {
+    if (transactionToDelete && transactionToDelete.id) {
+        try {
+            const success = await deleteItem('transactions', transactionToDelete.id);
+            if (success) {
+                // Atualização otimista da lista
+                setTransactions(prev => prev.filter(t => t.id !== transactionToDelete.id));
+                setIsDeleteModalOpen(false);
+                setTransactionToDelete(null);
+                // Recarrega para atualizar o resumo (summary)
+                loadData();
+            } else {
+                alert("Erro ao excluir lançamento.");
+            }
+        } catch (error) {
+            console.error("Erro ao excluir:", error);
+            alert("Ocorreu um erro ao tentar excluir.");
+        }
     }
   };
 
@@ -183,16 +206,16 @@ const Finance: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 flex justify-center space-x-2">
                     <button 
-                        className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600" 
+                        className="p-1.5 bg-brand-blue text-white rounded hover:bg-blue-600 transition-colors" 
                         title="Editar"
                         onClick={() => openModal(item)}
                     >
                         <Edit2 className="h-4 w-4" />
                     </button>
                     <button 
-                        className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600" 
+                        className="p-1.5 bg-brand-red text-white rounded hover:bg-red-600 transition-colors" 
                         title="Excluir"
-                        onClick={() => item.id && handleDelete(item.id)}
+                        onClick={() => handleDeleteClick(item)}
                     >
                         <Trash2 className="h-4 w-4" />
                     </button>
@@ -244,11 +267,46 @@ const Finance: React.FC = () => {
             </div>
 
              <div className="flex justify-end pt-2">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md">Cancelar</button>
+                <button type="button" onClick={() => setIsModalOpen(false)} className="mr-2 px-4 py-2 text-sm text-gray-700 bg-white border rounded-md hover:bg-gray-50">Cancelar</button>
                 <button type="submit" className="px-4 py-2 text-sm text-white bg-brand-blue rounded-md hover:bg-blue-600">Salvar</button>
             </div>
         </form>
       </Modal>
+
+      {/* Modal de Confirmação de Exclusão */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title="Confirmar Exclusão"
+      >
+        <div className="flex flex-col items-center text-center space-y-4">
+            <div className="bg-red-100 p-3 rounded-full">
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+            </div>
+            <div>
+                <h4 className="text-lg font-medium text-gray-900">Excluir Lançamento?</h4>
+                <p className="text-sm text-gray-500 mt-2">
+                    Você tem certeza que deseja excluir o lançamento <strong>{transactionToDelete?.description}</strong>? 
+                    <br/>Esta ação não poderá ser desfeita e afetará o saldo total.
+                </p>
+            </div>
+            <div className="flex w-full space-x-3 mt-4">
+                <button
+                    onClick={() => setIsDeleteModalOpen(false)}
+                    className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                    Cancelar
+                </button>
+                <button
+                    onClick={confirmDelete}
+                    className="w-full px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                    Excluir
+                </button>
+            </div>
+        </div>
+      </Modal>
+
     </div>
   );
 };

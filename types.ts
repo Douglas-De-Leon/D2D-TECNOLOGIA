@@ -1,3 +1,4 @@
+
 import { LucideIcon } from 'lucide-react';
 
 export interface MenuItem {
@@ -24,23 +25,31 @@ export interface StatMetric {
   color: string;
 }
 
+export interface UserPermission {
+    module: string;
+    view: boolean;
+    add: boolean;
+    edit: boolean;
+    delete: boolean;
+}
+
 // Database Entities
 export interface SystemUser {
     id?: number;
     name: string;
     email: string;
-    password?: string; // Only used for auth verification, not stored in state ideally
-    level: 'admin' | 'user' | 'client' | 'technician';
+    password?: string;
+    level: 'admin' | 'manager' | 'client' | 'technician';
     avatar_url?: string;
+    permissions?: UserPermission[];
 }
 
 export interface Client {
   id?: number;
   name: string;
-  cpf: string; // CPF ou CNPJ
+  cpf: string; 
   phone: string;
   email: string;
-  // Campos adicionais
   type: 'Cliente' | 'Fornecedor';
   cep?: string;
   street?: string;
@@ -66,10 +75,9 @@ export interface Service {
   price: string;
 }
 
-// Interface para itens dentro da OS e Vendas
 export interface OrderItem {
-    id: string; // ID único temporário para a lista visual ou ID do produto/serviço original
-    originalId?: number; // Referência ao ID no banco
+    id: string;
+    originalId?: number;
     name: string;
     price: number;
     quantity: number;
@@ -85,43 +93,39 @@ export interface Order {
   statusColor: string;
   total: string;
   description?: string;
-  
-  // Listas JSON
   services_list?: OrderItem[];
   products_list?: OrderItem[];
-  
-  // Mantendo compatibilidade com versões anteriores (visualização rápida na tabela)
   service?: string;     
 }
 
 export interface Sale {
   id?: number;
   client: string;
-  responsible?: string; // Adicionado para vincular ao funcionário
+  responsible?: string;
   date: string;
   total: string;
   status: 'Faturado' | 'Aberto' | 'Cancelado';
-  details: string; // Observações gerais
-  products_list?: OrderItem[]; // Lista de itens vendidos
+  details: string;
+  products_list?: OrderItem[];
 }
 
 export interface FileDocument {
   id?: number;
   name: string;
-  client?: string; // Nome do cliente/fornecedor associado
+  client?: string;
   date: string;
   description: string;
-  type: string; // Extension or mime type
+  type: string;
   size: string;
-  url?: string; // Placeholder for real URL
+  url?: string;
 }
 
 export interface Transaction {
   id?: number;
   type: 'receita' | 'despesa';
   description: string;
-  value: string; // Stored as string with currency formatting for simplicity in this demo
-  numericValue: number; // For calculations
+  value: string;
+  numericValue: number;
   date: string;
   status: string;
 }
@@ -133,5 +137,6 @@ export interface CompanySettings {
   phone: string;
   address: string;
   theme: string;
-  warrantyText?: string; // Texto dos termos de garantia
+  logo_url?: string;
+  warrantyText?: string;
 }

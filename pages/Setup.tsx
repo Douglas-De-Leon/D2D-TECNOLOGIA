@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Database, Copy, Check, RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -19,7 +20,8 @@ create table if not exists users (
   email text,
   password text,
   level text,
-  "avatar_url" text
+  "avatar_url" text,
+  permissions jsonb default '[]'::jsonb
 );
 
 create table if not exists settings (
@@ -30,7 +32,8 @@ create table if not exists settings (
   phone text,
   address text,
   theme text,
-  "warrantyText" text
+  "warrantyText" text,
+  "logo_url" text
 );
 
 create table if not exists clients (
@@ -113,6 +116,9 @@ create table if not exists transactions (
 -- 2. CORREÇÃO DE ESTRUTURA (Colunas novas)
 do $$
 begin
+  alter table users add column if not exists "avatar_url" text;
+  alter table users add column if not exists permissions jsonb default '[]'::jsonb;
+  
   alter table clients add column if not exists type text default 'Cliente';
   alter table clients add column if not exists cep text;
   alter table clients add column if not exists street text;
@@ -130,11 +136,9 @@ begin
   alter table service_sales add column if not exists responsible text;
 
   alter table settings add column if not exists "warrantyText" text;
+  alter table settings add column if not exists "logo_url" text;
 
   alter table files add column if not exists client text;
-
-  -- Coluna para Foto de Perfil
-  alter table users add column if not exists "avatar_url" text;
 exception
   when others then null;
 end $$;
@@ -179,34 +183,15 @@ create policy "Public access transactions" on transactions for all using (true) 
 -- 4. DADOS INICIAIS
 -- Admin
 delete from users where email = 'dougdeleon@gmail.com';
-insert into users (name, email, password, level)
-values ('Doug Deleon', 'dougdeleon@gmail.com', '29092019Ic#', 'admin');
+insert into users (name, email, password, level, permissions)
+values ('Doug Deleon', 'dougdeleon@gmail.com', '29092019Ic#', 'admin', '[]');
 
--- Exemplo Funcionario
-insert into users (name, email, password, level)
-select 'Técnico Exemplo', 'tecnico@mapos.com.br', '123456', 'technician'
-where not exists (select 1 from users where email = 'tecnico@mapos.com.br');
-
--- Exemplo Cliente (User associado a um cliente hipotético)
-insert into users (name, email, password, level)
-select 'Cliente Teste', 'cliente@mapos.com.br', '000.000.000-00', 'client'
-where not exists (select 1 from users where email = 'cliente@mapos.com.br');
-
+-- NOME ATUALIZADO PARA DDOS TECNOLOGIA
 insert into settings (name, cnpj, email, phone, address, theme, "warrantyText")
-select 'Map-OS Tecnologia', '00.000.000/0001-00', 'contato@mapos.com.br', '(11) 99999-9999', 'Rua Exemplo, 123', 'Padrão', 'Garantia padrão de 90 dias.'
+select 'DDOS TECNOLOGIA', '00.000.000/0001-00', 'contato@ddostecnologia.com.br', '(11) 99999-9999', 'Rua Exemplo, 123', 'Padrão', 'Garantia padrão de 90 dias.'
 where not exists (select 1 from settings);
 
--- 5. MIGRAÇÃO DE DADOS ANTIGOS
-do $$
-begin
-  if exists (select from information_schema.tables where table_name = 'sales') then
-     insert into service_sales (client, date, total, status, details)
-     select client, date, total, status, details from sales
-     where not exists (select 1 from service_sales where service_sales.client = sales.client and service_sales.date = sales.date);
-  end if;
-end $$;
-
--- 6. ATUALIZAR CACHE DO POSTGREST
+-- 5. ATUALIZAR CACHE DO POSTGREST
 NOTIFY pgrst, 'reload config';
 `;
 
@@ -226,62 +211,38 @@ NOTIFY pgrst, 'reload config';
         <div className="bg-brand-blue px-6 py-4 flex items-center justify-between">
             <div className="flex items-center text-white">
                 <Database className="h-6 w-6 mr-3" />
-                <h1 className="text-xl font-bold">Atualização do Sistema</h1>
+                <h1 className="text-xl font-bold">Atualização do Banco de Dados</h1>
             </div>
         </div>
-        
         <div className="p-6">
             <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
                 <div className="flex">
-                    <div className="flex-shrink-0">
-                        <AlertTriangle className="h-5 w-5 text-blue-400" />
-                    </div>
+                    <div className="flex-shrink-0"><AlertTriangle className="h-5 w-5 text-blue-400" /></div>
                     <div className="ml-3">
-                        <p className="text-sm text-blue-700 font-bold">
-                            Novos recursos de usuários detectados
-                        </p>
-                         <p className="text-xs text-blue-600 mt-1">
-                            Detectamos atualizações de permissões para <b>Funcionários</b>, <b>Clientes</b> e <b>Foto de Perfil</b>.
-                        </p>
+                        <p className="text-sm text-blue-700 font-bold">Ação Necessária: Coluna "permissions" ausente</p>
+                         <p className="text-xs text-blue-600 mt-1">Copie o script abaixo e execute no SQL Editor do seu projeto Supabase para adicionar o suporte a permissões granulares.</p>
                     </div>
                 </div>
             </div>
-
             {error && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
-                 <p className="text-sm text-red-700">
-                    <strong>Erro detectado:</strong> {error.message || JSON.stringify(error)}
-                 </p>
+                 <p className="text-sm text-red-700"><strong>Erro detectado:</strong> {error.message || JSON.stringify(error)}</p>
               </div>
             )}
-
-            <p className="text-gray-600 mb-4 text-sm">
-                Execute o script abaixo no Supabase para habilitar o login de clientes e funcionários:
-            </p>
-
             <div className="relative border border-gray-200 rounded-md bg-gray-900 overflow-hidden mb-6">
                 <div className="flex justify-between items-center px-4 py-2 bg-gray-800 border-b border-gray-700">
-                    <span className="text-xs text-gray-400 font-mono">update_users_v2.sql</span>
-                    <button 
-                        onClick={handleCopy}
-                        className="flex items-center text-xs text-white bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
-                    >
+                    <span className="text-xs text-gray-400 font-mono">fix_permissions_v1.sql</span>
+                    <button onClick={handleCopy} className="flex items-center text-xs text-white bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors">
                         {copied ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
                         {copied ? 'Copiado!' : 'Copiar SQL'}
                     </button>
                 </div>
-                <pre className="p-4 overflow-auto max-h-48 text-xs text-green-400 font-mono">
-                    {sqlScript}
-                </pre>
+                <pre className="p-4 overflow-auto max-h-48 text-xs text-green-400 font-mono">{sqlScript}</pre>
             </div>
-
             <div className="flex justify-center">
-                <button 
-                    onClick={handleRetry}
-                    className="flex items-center bg-brand-blue text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition-colors shadow-md font-medium"
-                >
+                <button onClick={handleRetry} className="flex items-center bg-brand-blue text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition-colors shadow-md font-medium">
                     <RefreshCw className="h-5 w-5 mr-2" />
-                    Recarregar Aplicação
+                    Tentar Novamente
                 </button>
             </div>
         </div>
